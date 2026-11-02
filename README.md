@@ -1,3 +1,8 @@
+Hedgewars Party - an AI coded party mode
+========≠============================≠==
+
+Uses a cloudflared worker based game controller to host "pass the keeb" style hw, but controlled from phone.
+
 Hedgewars - a turn-based strategy game
 ======================================
 [![Build Status](https://travis-ci.org/hedgewars/hw.svg)](https://travis-ci.org/hedgewars/hw)
