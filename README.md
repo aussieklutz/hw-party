@@ -1,5 +1,5 @@
 Hedgewars Party - an AI coded party mode
-========≠============================≠==
+========================================
 
 Uses a cloudflared worker based game controller to host "pass the keeb" style hw, but controlled from phone.
 
