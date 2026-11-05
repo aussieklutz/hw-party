@@ -47,7 +47,7 @@ var MaxTeamHealth: LongInt;
 
 implementation
 uses uLocale, uAmmos, uChat, uVariables, uUtils, uIO, uCaptions, uCommands, uDebug,
-    uGearsUtils, uGearsList, uVisualGearsList, uTextures
+    uGearsUtils, uGearsList, uVisualGearsList, uTextures, uWorld, uRenderUtils
     {$IFDEF USE_TOUCH_INTERFACE}, uTouch{$ENDIF};
 
 var TeamsGameOver: boolean;
@@ -452,7 +452,7 @@ else
         end;
 
     // Enable switching mode when gfSwitchHog is active
-    if ((GameFlags and gfSwitchHog) <> 0) and (not CurrentTeam^.hasGone) and
+    if ((GameFlags and gfSwitchHog) <> 0) and (not isPartyTeams) and (not CurrentTeam^.hasGone) and
             // Exception: During the special "Place your King" round in King Mode;
             // you're not supposed to switch away from your king in this round.
             (not (((GameFlags and gfKing) <> 0) and ((GameFlags and gfPlaceHog) = 0) and (TotalRoundsReal = -1))) then
@@ -485,6 +485,23 @@ else
         AddVoice(sndHmm, CurrentTeam^.voicepack);
     ReadyTimeLeft:= 0;
     end;
+
+if isPartyMode then
+    begin
+    SendIPC('x' + CurrentTeam^.TeamName);
+    // companion notice for the party frontend: active hog index as a single
+    // hex char ('0'..'9', 'a'..'f'), immediately after the team notice
+    t:= CurrentTeam^.CurrHedgehog;
+    if t < 10 then
+        SendIPC('y' + chr(48 + t))
+    else
+        SendIPC('y' + chr(87 + t));
+    // recentre the (virtual) cursor at the camera centre so each phone
+    // player starts their aim from a known position; the uWorld helper also
+    // syncs the camera motion baseline so the camera still focuses the next
+    // hedgehog at the start of the turn
+    PartyRecentreCursor
+    end
 end;
 
 function SetMissionTeam(): PTeam;

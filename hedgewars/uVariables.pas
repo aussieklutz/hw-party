@@ -89,6 +89,8 @@ var
     fastForward     : boolean;
     fastScrolling   : boolean;
     autoCameraOn    : boolean;
+    isPartyMode     : boolean;
+    isPartyTeams    : boolean; // party submode: per-hog seat control
 
     CheckSum        : LongWord;
     CampaignVariable: shortstring;
@@ -3019,6 +3021,8 @@ begin
     fastForward     := false;
     fastScrolling   := false;
     autoCameraOn    := true;
+    isPartyMode     := false;
+    isPartyTeams    := false;
     cSeed           := '';
     cIsSoundEnabled := false;
     cVolumeDelta    := 0;
