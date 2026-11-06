@@ -407,6 +407,8 @@ function startIpcServer() {
           handleEngineFrame(p);
         }
       });
+      // a killed or crashed engine resets the socket (Windows reports it as an error)
+      sock.on("error", (e) => log(`engine socket: ${e.code ?? e.message}`));
       sock.on("close", () => { if (engineSock === sock) engineSock = null; });
     });
     ipcServer.listen(0, "127.0.0.1", () => resolve(ipcServer.address().port));
