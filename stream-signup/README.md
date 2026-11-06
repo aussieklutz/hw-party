@@ -39,15 +39,18 @@ both workers.
 ## Deploy
 
 ```
-npx wrangler d1 create hwstream-signup      # put the printed id in wrangler.toml
+npx wrangler d1 create hwstream-signup      # put the printed id in wrangler.local.toml
 npx wrangler d1 execute DB --remote --file=./schema.sql
 npx wrangler secret put IDP_PRIVATE_JWK
 npx wrangler secret put SIGNUP_SECRET
 npx wrangler secret put SESSION_SECRET
-npm run deploy
+npx wrangler deploy --config wrangler.local.toml
 ```
 
-Set `STREAM_URL` (where signed-in players are sent back to) and `MAIL_FROM` in
-`wrangler.toml` `[vars]`, and configure Email Routing for the `send_email`
-binding. The stream worker gets `IDP_PUBLIC_JWK` (public) and
+Do the deploy from a git-ignored copy of the config, so that your real values
+never end up in a commit: `cp wrangler.toml wrangler.local.toml`, put the D1 id
+in it, set `STREAM_URL` (where signed-in players are sent back to) and
+`MAIL_FROM` in `[vars]`, and deploy with
+`npx wrangler deploy --config wrangler.local.toml`. Configure Email Routing for
+the `send_email` binding. The stream worker gets `IDP_PUBLIC_JWK` (public) and
 `SIGNUP_PUBLIC_URL` as vars, and a `SIGNUP` service binding to this worker.

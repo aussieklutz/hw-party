@@ -84,6 +84,19 @@ Testing/*
 gameServer2/rls
 gameServer2/target
 
+# local configuration and secrets: only the *.example files are tracked
+.env
+.env.local
+.dev.vars
+wrangler.local.toml
+
+# build output: the CMake build directory, the Rust target directories and the
+# Windows (tools/winbuild) packages
+/build/
+rust/**/target/
+tools/winbuild/out/
+tools/winbuild/*.zip
+
 # stream host recordings and live E2E test artifacts
 stream-host/recordings/
 .testshots/

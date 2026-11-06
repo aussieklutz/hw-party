@@ -55,6 +55,8 @@ QLayout *PageParty::bodyLayoutDefinition() {
   leServerUrl = new QLineEdit(partyBox);
   leServerUrl->setPlaceholderText(QLineEdit::tr(
       "URL of your party worker, e.g. https://party.example.com"));
+  // for a development setup: HEDGEWARS_PARTY_URL pre-fills the field
+  leServerUrl->setText(qEnvironmentVariable("HEDGEWARS_PARTY_URL"));
   partyLayout->addWidget(leServerUrl);
 
   BtnCreate = new QPushButton(partyBox);
