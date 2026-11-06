@@ -1,0 +1,6 @@
+# service auth shared with the stream worker (it posts game results)
+SIGNUP_SECRET=local-signup-secret-change-me
+# signs profile session cookies
+SESSION_SECRET=local-signup-session-secret-change-me
+# return the magic link in the API response instead of sending email
+DEV_MODE=1
