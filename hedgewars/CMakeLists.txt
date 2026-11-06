@@ -75,6 +75,7 @@ set(engine_sources
     uStats.pas
     uCursor.pas
     uVideoRec.pas
+    uFrameTap.pas
     uAILandMarks.pas
     adler32.pas
     uLandTexture.pas

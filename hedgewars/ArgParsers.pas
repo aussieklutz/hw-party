@@ -120,6 +120,9 @@ begin
     WriteLn(stdout, '  --raw-quality <flags>: Manually specify the reduced quality flags');
     WriteLn(stdout, '  --stats-only: Write the round information to console without launching the game, useful for statistics only');
     WriteLn(stdout, '  --lua-test <path to script>: Run a Lua test script');
+    WriteLn(stdout, '  --stream-video-port <port>: Send every frame as raw BGRA to this local tcp port');
+    WriteLn(stdout, '  --stream-audio-port <port>: Send the mixed audio as raw s16le to this local tcp port');
+    WriteLn(stdout, '  --hidden: Do not show the game window');
     GameType:= gmtSyntaxHelp;
     helpCommandUsed:= true;
 end;
@@ -244,13 +247,14 @@ begin
 end;
 
 function parseParameter(cmd:string; arg:string; var paramIndex:LongInt): Boolean;
-const reallyAll: array[0..37] of shortstring = (
+const reallyAll: array[0..40] of shortstring = (
                 '--prefix', '--user-prefix', '--locale', '--fullscreen-width', '--fullscreen-height', '--width',
                 '--height', '--maximized', '--frame-interval', '--volume','--nomusic', '--nosound', '--nodampen',
                 '--fullscreen', '--showfps', '--altdmg', '--low-quality', '--raw-quality', '--stereo', '--nick',
                 '--zoom',
   {internal}    '--internal', '--port', '--recorder', '--landpreview',
-  {misc}        '--stats-only', '--gci', '--help','--protocol', '--no-teamtag','--no-hogtag','--no-healthtag','--translucent-tags','--lua-test','--no-holiday-silliness','--chat-size', '--prefix64', '--user-prefix64');
+  {misc}        '--stats-only', '--gci', '--help','--protocol', '--no-teamtag','--no-hogtag','--no-healthtag','--translucent-tags','--lua-test','--no-holiday-silliness','--chat-size', '--prefix64', '--user-prefix64',
+  {streaming}   '--stream-video-port', '--stream-audio-port', '--hidden');
 var cmdIndex: byte;
 begin
     parseParameter:= false;
@@ -301,6 +305,9 @@ begin
         {--chat-size}           35 : cDefaultChatScale := 1.0 * getLongIntParameter(arg, paramIndex, parseParameter) / 100;
         {--prefix64}            36: PathPrefix := DecodeBase64(getstringParameter(arg, paramIndex, parseParameter));
         {--user-prefix64}       37: UserPathPrefix := DecodeBase64(getstringParameter(arg, paramIndex, parseParameter));
+        {--stream-video-port}   38: cStreamVideoPort := getLongIntParameter(arg, paramIndex, parseParameter);
+        {--stream-audio-port}   39: cStreamAudioPort := getLongIntParameter(arg, paramIndex, parseParameter);
+        {--hidden}              40: cHiddenWindow  := true;
     else
         begin
         //Assume the first "non parameter" is the demo file, anything else is invalid

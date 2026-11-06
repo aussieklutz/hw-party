@@ -65,7 +65,7 @@ procedure SetSkyColor(r, g, b: real);
 
 implementation
 uses uMisc, uConsole, uVariables, uUtils, uTextures, uRender, uRenderUtils,
-     uCommands, uPhysFSLayer, uDebug, uLocale, uInputHandler, adler32
+     uCommands, uPhysFSLayer, uDebug, uLocale, uInputHandler, adler32, uFrameTap
     {$IFDEF APPLE}{$IFNDEF PAS2C}, Math{$ENDIF}{$ENDIF}
     {$IFDEF USE_CONTEXT_RESTORE}, uWorld{$ENDIF};
 
@@ -1332,6 +1332,9 @@ begin
         if cFullScreen then
             flags:= flags or SDL_WINDOW_FULLSCREEN;
 
+        if cHiddenWindow then
+            flags:= (flags and not SDL_WINDOW_SHOWN) or SDL_WINDOW_HIDDEN;
+
         SDLwindow:= SDL_CreateWindow(PChar('Hedgewars'), x, y, cScreenWidth, cScreenHeight, flags);
         end
     // we're toggling
@@ -1397,6 +1400,7 @@ procedure SwapBuffers; {$IFDEF USE_VIDEO_RECORDING}cdecl{$ELSE}inline{$ENDIF};
 begin
     if GameType = gmtRecord then
         exit;
+    TapFrame;
     SDL_GL_SwapWindow(SDLwindow);
 end;
 

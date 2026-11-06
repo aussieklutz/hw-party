@@ -62,6 +62,9 @@ var
     cReadyDelay        : Longword;
     cStereoMode        : TStereoMode;
     cOnlyStats         : boolean;
+    cStreamVideoPort   : LongInt;
+    cStreamAudioPort   : LongInt;
+    cHiddenWindow      : boolean;
 {$IFDEF USE_VIDEO_RECORDING}
     RecPrefix          : shortstring;
     cAVFormat          : shortstring;
@@ -2745,6 +2748,9 @@ begin
     PathPrefix      := './';
     GameType        := gmtLocal;
     cOnlyStats      := False;
+    cStreamVideoPort:= 0;
+    cStreamAudioPort:= 0;
+    cHiddenWindow   := False;
     cScriptName     := '';
     cScriptParam    := '';
     cTestLua        := False;
