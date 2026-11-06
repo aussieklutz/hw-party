@@ -1059,6 +1059,8 @@ procedure SDL_free(mem: Pointer); cdecl; external SDLLibName;
 
 procedure SDL_Delay(msec: LongWord); cdecl; external SDLLibName;
 function  SDL_GetTicks: LongWord; cdecl; external SDLLibName;
+function  SDL_GetPerformanceCounter: QWord; cdecl; external SDLLibName;
+function  SDL_GetPerformanceFrequency: QWord; cdecl; external SDLLibName;
 
 function  SDL_MustLock(Surface: PSDL_Surface): Boolean;
 function  SDL_LockSurface(Surface: PSDL_Surface): LongInt; cdecl; external SDLLibName;
@@ -1103,6 +1105,7 @@ function  SDL_GetCurrentVideoDriver:Pchar; cdecl; external SDLLibName;
 function  SDL_GL_CreateContext(window: PSDL_Window): PSDL_GLContext; cdecl; external SDLLibName;
 procedure SDL_GL_DeleteContext(context: PSDL_GLContext); cdecl; external SDLLibName;
 procedure SDL_GL_SwapWindow(window: PSDL_Window); cdecl; external SDLLibName;
+function  SDL_GL_GetProcAddress(proc: PChar): Pointer; cdecl; external SDLLibName;
 function  SDL_GL_SetSwapInterval(interval: LongInt): LongInt; cdecl; external SDLLibName;
 
 procedure SDL_VideoQuit; cdecl; external SDLLibName;

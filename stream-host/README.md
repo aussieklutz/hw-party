@@ -78,6 +78,16 @@ OBS pulls `rtmp://localhost:1935/live/game` as usual. Set `ENCODER=nvenc` or
 The same tap works anywhere: `STREAM_TAP=1` on Linux uses SDL's offscreen
 video driver, so it needs no X server either.
 
+The engine reads each frame back through a ring of pixel buffer objects and
+sends it from a thread of its own, so the game does not wait for the graphics
+card or for ffmpeg. If ffmpeg falls behind, frames are dropped rather than
+slowing the game down. Two environment variables of the engine change that:
+`HW_TAP_MODE=0` is the plain blocking read, `1` reads through the buffers but
+sends in the game thread, `2` (the default) also sends from a thread;
+`HW_TAP_STATS=1` logs the time spent per frame and the dropped frames every 300
+frames. The Windows launcher gives mediamtx a 60 second timeout instead of 10,
+because the engine sends nothing while a game loads.
+
 ## GPU rendering (WSL2)
 
 Without a GPU the engine renders in software on the virtual display and uses

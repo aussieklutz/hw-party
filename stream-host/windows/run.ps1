@@ -60,6 +60,9 @@ if (-not $env:FEED_URL) { $env:FEED_URL = "rtmp://127.0.0.1:1935/live/game" }
 $mtxProc = $null
 try {
     if ($mediamtx) {
+        # the engine sends nothing while a game loads, which can take longer than the default 10 s
+        if (-not $env:MTX_READTIMEOUT) { $env:MTX_READTIMEOUT = "60s" }
+        if (-not $env:MTX_WRITETIMEOUT) { $env:MTX_WRITETIMEOUT = "60s" }
         $mtxProc = Start-Process $mediamtx -WorkingDirectory (Split-Path $mediamtx) -WindowStyle Hidden -PassThru
         Write-Host "mediamtx started: OBS Media Source input is rtmp://localhost:1935/live/game"
     }
