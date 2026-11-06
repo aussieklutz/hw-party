@@ -79,6 +79,8 @@ class HWTeam : public QObject {
   // attribute setters
   void bindKey(unsigned int idx, const QString& key);
   void setDifficulty(unsigned int level);
+  // optional per-hog override for mixed human/CPU teams; index 0-based
+  void setHogDifficulty(int i, int level);
   void setFlag(const QString& flag);
   void setFort(const QString& fort);
   void setGrave(const QString& grave);
@@ -88,6 +90,11 @@ class HWTeam : public QObject {
   void setVoicepack(const QString& voicepack);
   void setNetTeam(bool isNetTeam);
   void setMissionTeam(bool isMissionTeam);
+  // party mode: the team arrives via the party worker like a net team, but
+  // the game itself is local — the engine must run the turn machine itself,
+  // so teamGameConfig must NOT send erdriven for these teams
+  void setSkipRDriven(bool skip);
+  bool skipRDriven() const;
 
   // convert team info into strings for further computation
   QStringList teamGameConfig(quint32 InitHealth) const;
@@ -111,6 +118,7 @@ class HWTeam : public QObject {
   QString m_voicepack;
   QList<HWHog> m_hedgehogs;
   quint8 m_difficulty;
+  QList<int> m_hogDifficulties;
   QList<BindAction> m_binds;
 
   // class members that contain info for the current game setup
@@ -118,6 +126,7 @@ class HWTeam : public QObject {
   int m_color;
   bool m_isNetTeam;
   bool m_isMissionTeam;
+  bool m_skipRDriven;
   QString m_owner;
 
   // class members that contain statistics, etc.

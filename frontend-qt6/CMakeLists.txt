@@ -11,7 +11,7 @@ set(CMAKE_AUTORCC ON)
 #find_package(PkgConfig REQUIRED)
 #pkg_check_modules(SDL2_MIXER REQUIRED IMPORTED_TARGET SDL2_mixer)
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Widgets Network LinguistTools)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Widgets Network WebSockets LinguistTools)
 find_package(SDL2 REQUIRED CONFIG)
 find_package(SDL2_mixer REQUIRED)
 
@@ -140,16 +140,23 @@ qt_add_executable(hedgewars
     net/netudpwidget.h
     net/newnetclient.cpp
     net/newnetclient.h
+    net/partyclient.cpp
+    net/partyclient.h
     net/proto.cpp
     net/proto.h
     net/recorder.cpp
     net/recorder.h
     net/tcpBase.cpp
     net/tcpBase.h
+    partyhostcore.cpp
+    partyhostcore.h
+    partylayout.cpp
+    partylayout.h
     sdlkeys.cpp
     sdlkeys.h
     team.cpp
     team.h
+    thirdparty/qrcodegen/qrcodegen.cpp
     ui/dialog/ask_quit.cpp
     ui/dialog/ask_quit.h
     ui/dialog/bandialog.cpp
@@ -192,6 +199,8 @@ qt_add_executable(hedgewars
     ui/page/pagenetserver.h
     ui/page/pageoptions.cpp
     ui/page/pageoptions.h
+    ui/page/pageparty.cpp
+    ui/page/pageparty.h
     ui/page/pageplayrecord.cpp
     ui/page/pageplayrecord.h
     ui/page/pageroomslist.cpp
@@ -333,10 +342,15 @@ target_link_libraries(hedgewars
         Qt::Core
         Qt::Widgets
         Qt::Network
+        Qt::WebSockets
         SDL2::SDL2
         ${SDL2_MIXER_LIBRARIES}
         physfs
         physlayer
+)
+
+target_include_directories(hedgewars PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/qrcodegen
 )
 
 include(GNUInstallDirs)

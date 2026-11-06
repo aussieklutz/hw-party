@@ -20,6 +20,8 @@
 #define HWFORM_H
 
 #include <QElapsedTimer>
+#include <QHash>
+#include <QJsonObject>
 #include <QMainWindow>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -28,6 +30,7 @@
 #include <QPropertyAnimation>
 #include <QStack>
 #include <QTime>
+#include <QTimer>
 #include <QUrl>
 
 #include "SDLInteraction.h"
@@ -36,6 +39,7 @@
 #include "game.h"
 #include "hwform_ui.h"
 #include "netserver.h"
+#include "partyhostcore.h"
 
 #ifdef __APPLE__
 #include "InstallController.h"
@@ -45,6 +49,7 @@ class HWGame;
 class HWTeam;
 class HWNamegen;
 class HWNewNet;
+class PartyClient;
 class GameUIConfig;
 class HWNetRegisterServer;
 class QCloseEvent;
@@ -104,6 +109,26 @@ class HWForm : public QMainWindow {
   void NetConnectServer(const QString &host, quint16 port, bool useTls);
   void NetConnectOfficialServer();
   void NetStartServer();
+  void PartyCreate();
+  void PartyStart();
+  void PartyRoomCreated(const QString &code);
+  void updatePartySlots();
+  void updateDynamicCpu();
+  HWTeam makeCpuPlaceholder(int n) const;
+  void PartyTeamRegistered(const QString &sid, const QJsonObject &config,
+                           int seat);
+  void PartyMemberJoined(const QString &sid);
+  void PartyMemberLeft(const QString &sid);
+  void PartyError(const QString &message);
+  void PartyGameEnded();
+  void PartyTraitorSwapped(const QString &fromTeam);
+  void PartyTurnTeamChanged(const QString &teamName, int hogIndex);
+  void PartyInput(const QString &sid, const QString &action);
+  void PartyCursor(const QString &sid, int x, int y);
+  void PartyPut(const QString &sid, int x, int y);
+  void sendPartyXY(char cmd, int x, int y);
+  void sendPartyCommand(const QString &command);
+  void releasePartyKeys();
   void NetRedirected(quint16 port);
   void NetDisconnect();
   void NetConnected();
@@ -190,6 +215,7 @@ class HWForm : public QMainWindow {
     ID_PAGE_TRAINING,
     ID_PAGE_SELECTWEAPON,
     ID_PAGE_NETSERVER,
+    ID_PAGE_PARTY,
     ID_PAGE_INGAME,
     ID_PAGE_ROOMSLIST,
     ID_PAGE_CONNECTING,
@@ -206,6 +232,36 @@ class HWForm : public QMainWindow {
   QPointer<HWNetRegisterServer> pRegisterServer;
   QPointer<HWTeam> editedTeam;
   QPointer<HWNewNet> hwnet;
+  QPointer<PartyClient> partyClient;
+  QHash<QString, QString> m_partyTeamToSid;
+  QString m_partyActiveSid;
+  QString m_partyMode;
+  int m_partySlots;
+  int m_partyCpuTier;
+  QList<HWTeam> m_partyPlaceholders;
+  QStringList m_partyAdopted;
+  QStringList m_partyGone;
+  int m_partyCpuCounter;
+
+  // Team and imposter lobbies: the lobby, the imposters and the turn routing
+  // live in PartyHostCore (UI-free, tested on its own); HWForm applies what it
+  // says.
+  PartyHostCore *m_partyCore = nullptr;
+  void ensurePartyCore();
+  bool isPartySeatMode() const;
+  int partyMaxPlayers() const;
+  // AFK turn countdown (a sleeping phone skips its turn): the host
+  // probes /alive at turn starts and pauses/skips on silence
+  void PartyAliveChecked(const QString &sid, bool alive);
+  void PartyAfkTick();
+  void cancelPartyAfk();
+  void startPartyAfkWatch(const QString &teamName, const QString &sid);
+  void sendPartyRaw(const QString &command);
+  QString m_partyAfkSid;
+  QString m_partyAfkTeam;
+  int m_partyAfkLeft = 0;
+  bool m_partyEnginePaused = false;
+  QTimer *m_partyAfkTimer = nullptr;
   HWNamegen *namegen;
   GameSchemeModel *gameSchemeModel;
   QStack<int> PagesStack;

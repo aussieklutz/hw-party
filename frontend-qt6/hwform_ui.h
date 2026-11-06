@@ -26,6 +26,7 @@ class PagePlayDemo;
 class PageOptions;
 class PageNet;
 class PageNetServer;
+class PageParty;
 class PageNetChat;
 class PageNetGame;
 class PageInfo;
@@ -59,6 +60,7 @@ class Ui_HWForm {
   PageOptions *pageOptions;
   PageNet *pageNet;
   PageNetServer *pageNetServer;
+  PageParty *pageParty;
   PageNetChat *pageNetChat;
   PageNetGame *pageNetGame;
   PageInfo *pageInfo;
