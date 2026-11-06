@@ -41,7 +41,8 @@ let turns = 0;
 
 function enterRoom(room) {
   console.log("admitted to room", room);
-  fetch(`${base}/api/rooms/${room}/join`, { method: "POST" }).then((res) => {
+  // a stream room takes only the player the queue admitted: its session cookie says who
+  fetch(`${base}/api/rooms/${room}/join`, { method: "POST", headers: cookie ? { cookie } : {} }).then((res) => {
     console.log("room join:", res.status);
     const rcookie = (res.headers.get("set-cookie") ?? "").split(";")[0];
     roomWs = new WebSocket(`${proto}/api/rooms/${room}/ws`, { headers: { cookie: rcookie } });

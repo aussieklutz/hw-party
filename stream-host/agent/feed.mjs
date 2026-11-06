@@ -37,6 +37,8 @@ const DISPLAY = process.env.STREAM_DISPLAY ?? ":99";
 const FPS = Number(process.env.STREAM_FPS ?? 30);
 const PULSE_SOURCE = process.env.PULSE_SOURCE ?? "hw.monitor";
 const FFMPEG_BIN = process.env.FFMPEG_BIN ?? "ffmpeg";
+// the tap (tap.mjs) feeds the same server straight from the engine
+const TAP = process.env.STREAM_TAP === "1";
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), "[feed]", ...a);
 
@@ -91,7 +93,7 @@ function spawnFeed() {
 
 /** Phase entry point: keep a feed alive iff the phase is ingame. */
 export function setFeedPhase(phase) {
-  if (!FEED_URL) return; // no push target configured — feed disabled
+  if (!FEED_URL || TAP) return; // no push target configured — feed disabled
   const want = phase === "ingame";
   if (want === active) return;
   active = want;

@@ -47,6 +47,37 @@ cp stream-host/.env.example stream-host/.env    # then fill in WORKER_URL and th
 podman-compose -f stream-host/docker-compose.yml up -d
 ```
 
+## Windows host (no capture)
+
+On Windows the stream host runs natively with no container, no virtual display
+and no screen grab. The engine renders into a hidden window on the GPU
+(`--hidden`) and hands every frame and its mixed audio to an ffmpeg over two
+local ports (`--stream-video-port`, `--stream-audio-port`); ffmpeg encodes with
+Intel Quick Sync (or NVENC) at a constant bitrate with a keyframe every two
+seconds and pushes to the RTMP server. In a 1080p60 test it took about one
+core for the engine and one and a half for ffmpeg, and held 56 to 60 fps.
+
+You need Node.js 22 or newer, a Hedgewars Windows release, an ffmpeg with
+`h264_qsv` (or `h264_nvenc`) and, optionally, mediamtx. Lay them out next to
+`windows\run.ps1`:
+
+```
+.env                   WORKER_URL and STREAM_HOST_SECRET
+agent\ data\          from stream-host
+game\                  the release: hwengine.exe, Data\, the DLLs
+ffmpeg\ffmpeg.exe
+mediamtx\mediamtx.exe  optional
+```
+
+```
+powershell -ExecutionPolicy Bypass -File windows\run.ps1
+```
+
+OBS pulls `rtmp://localhost:1935/live/game` as usual. Set `ENCODER=nvenc` or
+`x264`, `STREAM_FPS`, `VIDEO_KBPS` and so on in `.env` to change the feed.
+The same tap works anywhere: `STREAM_TAP=1` on Linux uses SDL's offscreen
+video driver, so it needs no X server either.
+
 ## GPU rendering (WSL2)
 
 Without a GPU the engine renders in software on the virtual display and uses
@@ -55,7 +86,8 @@ instead: `/dev/dxg` plus Mesa's d3d12 driver give it hardware OpenGL, and the
 engine drops to about 0.15 core. Add the override file to the compose command:
 
 ```
-docker compose -f stream-host/docker-compose.yml                -f stream-host/docker-compose.wsl-gpu.yml up -d
+docker compose -f stream-host/docker-compose.yml \
+               -f stream-host/docker-compose.wsl-gpu.yml up -d
 ```
 
 `GPU_ADAPTER` picks the adapter by name (`NVIDIA` by default, `Intel` for the
