@@ -47,6 +47,21 @@ cp stream-host/.env.example stream-host/.env    # then fill in WORKER_URL and th
 podman-compose -f stream-host/docker-compose.yml up -d
 ```
 
+## GPU rendering (WSL2)
+
+Without a GPU the engine renders in software on the virtual display and uses
+about 1.5 cores at 720p. Under WSL2 the container can use the Windows GPU
+instead: `/dev/dxg` plus Mesa's d3d12 driver give it hardware OpenGL, and the
+engine drops to about 0.15 core. Add the override file to the compose command:
+
+```
+docker compose -f stream-host/docker-compose.yml                -f stream-host/docker-compose.wsl-gpu.yml up -d
+```
+
+`GPU_ADAPTER` picks the adapter by name (`NVIDIA` by default, `Intel` for the
+integrated one). This is for WSL2 only; on a Linux host use the vendor's
+container toolkit instead.
+
 ## Local config
 
 Nothing instance-specific is committed. Real values live in git-ignored files

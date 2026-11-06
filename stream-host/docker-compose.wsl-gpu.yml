@@ -1,0 +1,20 @@
+# GPU rendering for a stream host running under WSL2 (Docker Desktop or Podman).
+#
+# WSL2 exposes the Windows GPU as /dev/dxg. Mesa's d3d12 driver, already in the
+# image, turns it into hardware OpenGL, so the engine no longer renders in
+# software on the virtual display. Use it on top of the main file:
+#
+#   docker compose -f stream-host/docker-compose.yml \
+#                  -f stream-host/docker-compose.wsl-gpu.yml up -d
+#
+#   GPU_ADAPTER   part of the adapter name to render on (default NVIDIA);
+#                 Intel picks the integrated GPU
+services:
+  stream:
+    devices:
+      - /dev/dxg
+    volumes:
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+    environment:
+      LD_LIBRARY_PATH: /opt/hw/lib:/opt/hw/bin:/usr/lib/wsl/lib
+      MESA_D3D12_DEFAULT_ADAPTER_NAME: ${GPU_ADAPTER:-NVIDIA}
