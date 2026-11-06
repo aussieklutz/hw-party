@@ -41,28 +41,67 @@ uses uVariables, uConsts, GLunit, SDLh, uConsole, uUtils;
 
 const
     GL_BGRA_FORMAT = $80E1;
-    connectAttempts = 50; // the encoder starts listening just before the engine
+    connectTimeout = 10000; // the encoder starts listening just before the engine
+    // an encoder reads a little of an input before it listens on the next one
+    probeSize = 65536;
 
 var videoSock, audioSock: PTCPSocket;
     frameBuffer: PByte;
     frameSize: LongInt;
     frameWidth, frameHeight: LongInt;
-    tapFailed: boolean;
+    connected, tapFailed: boolean;
 
 function OpenSocket(port: LongInt): PTCPSocket;
 var ipaddr: TIPAddress;
-    attempt: LongInt;
+    startTime: LongWord;
 begin
     OpenSocket:= nil;
     if SDLNet_ResolveHost(ipaddr, PChar('127.0.0.1'), port) <> 0 then
         exit;
 
-    for attempt:= 1 to connectAttempts do
-        begin
+    startTime:= SDL_GetTicks();
+    repeat
         OpenSocket:= SDLNet_TCP_Open(ipaddr);
         if OpenSocket <> nil then
             exit;
         SDL_Delay(100)
+    until SDL_GetTicks() - startTime > connectTimeout
+end;
+
+// The encoder listens on the audio port first and on the video port once it
+// has read some audio, so both are opened together, audio first, and the
+// audio gets a little silence to read.
+procedure Connect;
+var silence: PByte;
+begin
+    if connected then
+        exit;
+    connected:= true;
+
+    if cStreamAudioPort <> 0 then
+        begin
+        WriteToConsole('Audio tap: connecting to port ' + IntToStr(cStreamAudioPort) + ' ');
+        audioSock:= OpenSocket(cStreamAudioPort);
+        if audioSock = nil then
+            WriteLnToConsole(msgFailed)
+        else
+            begin
+            WriteLnToConsole(msgOK);
+            GetMem(silence, probeSize);
+            FillChar(silence^, probeSize, 0);
+            SDLNet_TCP_Send(audioSock, silence, probeSize);
+            FreeMem(silence)
+            end
+        end;
+
+    if cStreamVideoPort <> 0 then
+        begin
+        WriteToConsole('Frame tap: connecting to port ' + IntToStr(cStreamVideoPort) + ' ');
+        videoSock:= OpenSocket(cStreamVideoPort);
+        if videoSock = nil then
+            WriteLnToConsole(msgFailed)
+        else
+            WriteLnToConsole(msgOK)
         end
 end;
 
@@ -79,17 +118,15 @@ begin
     if (cStreamVideoPort = 0) or tapFailed then
         exit;
 
+    Connect;
     if videoSock = nil then
         begin
-        WriteToConsole('Frame tap: connecting to port ' + IntToStr(cStreamVideoPort) + ' ');
-        videoSock:= OpenSocket(cStreamVideoPort);
-        if videoSock = nil then
-            begin
-            WriteLnToConsole(msgFailed);
-            tapFailed:= true;
-            exit
-            end;
-        WriteLnToConsole(msgOK);
+        tapFailed:= true;
+        exit
+        end;
+
+    if frameBuffer = nil then
+        begin
         frameWidth:= cScreenWidth;
         frameHeight:= cScreenHeight;
         frameSize:= frameWidth * frameHeight * 4;
@@ -127,15 +164,9 @@ begin
     if cStreamAudioPort = 0 then
         exit;
 
-    WriteToConsole('Audio tap: connecting to port ' + IntToStr(cStreamAudioPort) + ' ');
-    audioSock:= OpenSocket(cStreamAudioPort);
-    if audioSock = nil then
-        WriteLnToConsole(msgFailed)
-    else
-        begin
-        WriteLnToConsole(msgOK);
+    Connect;
+    if audioSock <> nil then
         Mix_SetPostMix(@TapPostMix, nil)
-        end
 end;
 
 procedure freeModule;

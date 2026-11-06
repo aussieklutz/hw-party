@@ -77,9 +77,11 @@ function ffmpegArgs() {
     "-hide_banner", "-loglevel", "warning", "-nostdin",
     // audio first: the engine connects its audio when it starts up and its video
     // with the first frame, and ffmpeg opens its inputs in this order
-    "-use_wallclock_as_timestamps", "1",
+    "-probesize", "32768", "-analyzeduration", "0", "-use_wallclock_as_timestamps", "1",
+    "-thread_queue_size", "512",
     "-f", "s16le", "-ar", "44100", "-ac", "2", "-i", `tcp://127.0.0.1:${AUDIO_PORT}?listen`,
-    "-use_wallclock_as_timestamps", "1",
+    "-analyzeduration", "0", "-use_wallclock_as_timestamps", "1",
+    "-thread_queue_size", "64",
     "-f", "rawvideo", "-pix_fmt", "bgra", "-video_size", `${W}x${H}`, "-i", `tcp://127.0.0.1:${VIDEO_PORT}?listen`,
     ...encoderArgs(),
     "-fps_mode", "cfr", "-r", String(FPS),
