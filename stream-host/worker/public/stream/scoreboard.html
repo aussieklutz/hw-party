@@ -1,0 +1,130 @@
+<!doctype html>
+<!-- /stream/scoreboard — M12 overlay view: all-time high score.
+     OBS browser source: transparent background, fixed 1920x1080.
+     Options: ?bg=dark opaque variant, ?scale=0.75 shrink, ?top=10 rows. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>hw · high score</title>
+    <style>
+      :root { --ink: #f2ead8; --dim: #b7aed6; --accent: #ffcc00; --accent2: #7ec6ff; --line: rgba(120,110,190,.55); --panel: rgba(23,19,53,.78); }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { background: transparent; }
+      body {
+        width: 100vw; height: 100vh; overflow: hidden;
+        color: var(--ink); font-family: "Segoe UI", system-ui, sans-serif;
+        display: flex; flex-direction: column; gap: 1.6vh;
+        padding: 3.5vh 3vw; justify-content: center;
+        text-shadow: 0 2px 6px rgba(0,0,0,.85);
+      }
+      body.bg { background: #0d0b1e; text-shadow: none; }
+      h1 { font-size: clamp(30px, 4.2vw, 58px); }
+      h1 .hl { color: var(--accent); }
+      .tbl {
+        display: grid;
+        grid-template-columns: 3.2em 1fr repeat(3, minmax(5.5em, 8em));
+        align-content: start; row-gap: .9vh; column-gap: 1.4vw;
+        font-size: clamp(15px, 2vw, 30px);
+      }
+      .head {
+        color: var(--dim); text-transform: uppercase; font-size: .78em;
+        letter-spacing: 1.5px; border-bottom: 1px solid var(--line); padding-bottom: .7vh;
+      }
+      .row { display: contents; }
+      .rank { color: var(--accent2); font-weight: 700; }
+      .num { text-align: right; font-variant-numeric: tabular-nums; }
+      .empty { grid-column: 1 / -1; color: var(--dim); font-size: clamp(14px, 1.6vw, 24px); }
+    </style>
+  </head>
+  <body>
+    <h1><span class="hl">All-time</span> top players</h1>
+    <div class="tbl" id="sbody"></div>
+    <script type="module">
+      const q = new URLSearchParams(location.search);
+      if (q.get("bg") === "dark") document.body.classList.add("bg");
+      const s = Number(q.get("scale") ?? 1);
+      if (s !== 1) document.body.style.zoom = String(s);
+      const top = Math.max(3, Math.min(20, Number(q.get("top") ?? 10)));
+
+      // Glicko top-20 from the signup worker (via /api/top) when configured;
+      // falls back to the local wins/kills ladder otherwise
+      function renderTop(rows) {
+        const body = document.getElementById("sbody");
+        body.replaceChildren();
+        for (const h of ["#", "Player", "Rating", "RD", "Record"]) {
+          const el = document.createElement("div");
+          el.className = "head";
+          el.textContent = h;
+          body.appendChild(el);
+        }
+        if (!rows.length) {
+          const el = document.createElement("div");
+          el.className = "empty";
+          el.textContent = "No rated games yet — the ladder starts today.";
+          body.appendChild(el);
+          return true;
+        }
+        for (const r of rows) {
+          const row = document.createElement("div");
+          row.className = "row";
+          const cells = [
+            String(r.rank),
+            r.name,
+            String(Math.round(r.rating)),
+            "±" + String(r.rd),
+            `${r.wins}–${r.games - r.wins}`,
+          ];
+          for (const [ci, c] of cells.entries()) {
+            const el = document.createElement("div");
+            if (ci === 0) el.className = "rank";
+            else if (ci >= 2) el.className = "num";
+            el.textContent = c;
+            row.appendChild(el);
+          }
+          body.appendChild(row);
+        }
+        return true;
+      }
+
+      function render(d) {
+        const body = document.getElementById("sbody");
+        body.replaceChildren();
+        for (const h of ["#", "Player", "Wins", "Kills", "Games"]) {
+          const el = document.createElement("div");
+          el.className = "head";
+          el.textContent = h;
+          body.appendChild(el);
+        }
+        const rows = (d.ladder ?? []).slice(0, top);
+        if (!rows.length) {
+          const el = document.createElement("div");
+          el.className = "empty";
+          el.textContent = "No games recorded yet — the ladder starts today.";
+          body.appendChild(el);
+          return;
+        }
+        for (const [i, r] of rows.entries()) {
+          const row = document.createElement("div");
+          row.className = "row";
+          for (const [ci, c] of [String(i + 1), r.name, String(r.wins), String(r.kills), String(r.games)].entries()) {
+            const el = document.createElement("div");
+            if (ci === 0) el.className = "rank";
+            else if (ci >= 2) el.className = "num";
+            el.textContent = c;
+            row.appendChild(el);
+          }
+          body.appendChild(row);
+        }
+      }
+      async function poll() {
+        try {
+          const t = await (await fetch("/api/top")).json();
+          if ((t.top ?? []).length) { renderTop(t.top); return; }
+        } catch {}
+        try { render(await (await fetch("/api/queue/state")).json()); } catch {}
+      }
+      poll();
+      setInterval(poll, 2000);
+    </script>
+  </body>
+</html>

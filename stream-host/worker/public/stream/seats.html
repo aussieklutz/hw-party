@@ -1,0 +1,97 @@
+<!doctype html>
+<!-- /stream/seats — M12 overlay view: the join slot matrix.
+     Renders the round's seats as a grid (team / CPU / Open); when no round is
+     filling (phase slate/ingame) the view hides itself so the OBS browser
+     source composites as empty — the "disabled when not relevant" behaviour.
+     OBS browser source: transparent background, fixed 1920x1080.
+     Options: ?bg=dark opaque, ?scale=x, ?always=1 never hide. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>hw · seats</title>
+    <style>
+      :root { --ink: #f2ead8; --dim: #b7aed6; --accent: #ffcc00; --line: rgba(120,110,190,.55); --panel: rgba(23,19,53,.78); }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { background: transparent; }
+      body {
+        width: 100vw; height: 100vh; overflow: hidden;
+        color: var(--ink); font-family: "Segoe UI", system-ui, sans-serif;
+        display: flex; flex-direction: column; gap: 2vh;
+        padding: 3.5vh 3vw; justify-content: center;
+        text-shadow: 0 2px 6px rgba(0,0,0,.85);
+        transition: opacity .45s ease;
+      }
+      body.bg { background: #0d0b1e; text-shadow: none; }
+      body.hidden { opacity: 0; pointer-events: none; }
+      h1 { font-size: clamp(28px, 3.8vw, 54px); }
+      h1 .hl { color: var(--accent); }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(18vw, 30vw));
+        gap: 2vh 2.5vw; align-content: center; justify-content: center;
+        flex: 1;
+      }
+      .seat {
+        border: 2px solid var(--line); border-radius: 14px; background: var(--panel);
+        min-height: 14vh; display: flex; align-items: center; justify-content: center;
+        font-size: clamp(18px, 2.4vw, 38px); font-weight: 600;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 1vw;
+      }
+      .seat.open { border-style: dashed; color: var(--dim); background: transparent; }
+      .seat.cpu { color: var(--dim); font-style: italic; }
+      .sub { text-align: center; color: var(--dim); font-size: clamp(14px, 1.7vw, 26px); }
+      .sub b { color: var(--ink); }
+    </style>
+  </head>
+  <body>
+    <div id="wrap" style="display:flex;flex-direction:column;gap:2vh;height:100%">
+      <h1><span class="hl">Next game</span> — grab a seat</h1>
+      <div class="grid" id="seats"></div>
+      <div class="sub" id="sub"></div>
+    </div>
+    <script type="module">
+      const q = new URLSearchParams(location.search);
+      if (q.get("bg") === "dark") document.body.classList.add("bg");
+      const s = Number(q.get("scale") ?? 1);
+      if (s !== 1) document.body.style.zoom = String(s);
+      const always = q.get("always") === "1";
+
+      function seatsOf(roster) {
+        const cap = Math.max(0, roster?.capacity ?? 0);
+        const seats = (roster?.seats ?? []).slice(0, cap || roster?.seats?.length || 4);
+        while (cap && seats.length < cap) seats.push(null);
+        return seats.length ? seats : [null, null, null, null].slice(0, cap || 4);
+      }
+      function render(d) {
+        const waiting = always || d.phase === "lobby" || d.phase === "countdown";
+        document.body.classList.toggle("hidden", !waiting);
+        if (!waiting) return;
+        const grid = document.getElementById("seats");
+        grid.replaceChildren();
+        for (const seat of seatsOf(d.roster)) {
+          const el = document.createElement("div");
+          if (!seat) { el.className = "seat open"; el.textContent = "Open"; }
+          else if (seat.cpu) { el.className = "seat cpu"; el.textContent = seat.name; }
+          else { el.className = "seat"; el.textContent = seat.name; }
+          grid.appendChild(el);
+        }
+        const sub = document.getElementById("sub");
+        if (d.phase === "countdown" && d.countdownEndsAt) {
+          const left = Math.max(0, Math.ceil((d.countdownEndsAt - Date.now()) / 1000));
+          sub.innerHTML = left > 0
+            ? (d.openSeats > 0
+              ? `Starting in <b>${left}s</b> — last chance to scan!`
+              : `Starting in <b>${left}s</b> — lobby locked`)
+            : "Starting…";
+        } else {
+          sub.textContent = d.phase === "lobby" ? "Lobby open — scan the code to jump in!" : "";
+        }
+      }
+      async function poll() {
+        try { render(await (await fetch("/api/queue/state")).json()); } catch {}
+      }
+      poll();
+      setInterval(poll, 1500);
+    </script>
+  </body>
+</html>

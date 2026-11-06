@@ -1,0 +1,35 @@
+name = "hwstream"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+assets = { directory = "./public" }
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "RoomDO"
+
+[[durable_objects.bindings]]
+name = "QUEUE"
+class_name = "QueueDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["QueueDO"]
+
+# M11.4: the signup worker (same-zone worker fetches are blocked — error
+# 1042 — so the service binding is the production path; SIGNUP_URL in
+# .dev.vars is the local-dev fallback)
+[[services]]
+binding = "SIGNUP"
+service = "hwstream-signup"
+
+# the public origin of the signup worker: where "sign in" sends the phone
+# (the SIGNUP service binding carries the API calls; same-zone fetches are
+# blocked, which is why the identity token travels in the URL fragment).
+# Set it for your deployment; without it the stream has no "sign in" link.
+# [vars]
+# SIGNUP_PUBLIC_URL = "https://signup.example.com"

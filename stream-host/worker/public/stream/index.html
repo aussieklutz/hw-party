@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hedgewars Stream — slate</title>
+    <style>
+      :root {
+        --bg: #0d0b1e;
+        --panel: #171335;
+        --ink: #f2ead8;
+        --dim: #9b93b8;
+        --accent: #ffcc00;
+        --accent2: #7ec6ff;
+        --line: #2b2454;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; }
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font-family: "Segoe UI", system-ui, sans-serif;
+        overflow: hidden;
+      }
+      #stage { position: fixed; inset: 0; }
+      .slide {
+        position: absolute; inset: 0;
+        display: none;
+        padding: 4vh 5vw;
+        flex-direction: column;
+        gap: 2vh;
+        opacity: 0;
+        transition: opacity .45s ease;
+      }
+      .slide.on { display: flex; opacity: 1; }
+      h1 {
+        font-size: clamp(28px, 4.6vw, 64px);
+        letter-spacing: .5px;
+      }
+      h1 .hl { color: var(--accent); }
+      .sub { color: var(--dim); font-size: clamp(14px, 1.5vw, 22px); }
+
+      /* commentary */
+      #commentary .lines {
+        flex: 1; overflow: hidden;
+        display: flex; flex-direction: column; justify-content: center; gap: 1.2vh;
+      }
+      #commentary .line {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 1.6vh 1.6vw;
+        font-size: clamp(16px, 2vw, 30px);
+      }
+      #commentary .line.winner {
+        border-color: var(--accent);
+        color: var(--accent);
+        font-weight: 700;
+      }
+
+      /* scoreboard */
+      #scoreboard .tbl {
+        flex: 1; overflow: hidden;
+        display: grid;
+        grid-template-columns: 4em 1fr repeat(3, minmax(6em, 9em));
+        align-content: start;
+        row-gap: .8vh;
+        column-gap: 1.2vw;
+        font-size: clamp(14px, 1.8vw, 26px);
+      }
+      #scoreboard .tbl .head {
+        color: var(--dim);
+        text-transform: uppercase;
+        font-size: .8em;
+        letter-spacing: 1.5px;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: .8vh;
+      }
+      #scoreboard .rank { color: var(--accent2); font-weight: 700; }
+      #scoreboard .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+      /* how to play */
+      #howto ol {
+        flex: 1;
+        display: flex; flex-direction: column; justify-content: center;
+        gap: 2.2vh;
+        font-size: clamp(16px, 2.1vw, 32px);
+        line-height: 1.45;
+        padding-left: 1.2em;
+      }
+      #howto .key {
+        display: inline-block;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: .05em .5em;
+        margin: 0 .15em;
+        color: var(--accent2);
+        font-weight: 600;
+      }
+
+      /* lobby / countdown frame */
+      #lobby .count {
+        font-size: clamp(48px, 9vw, 140px);
+        font-weight: 800;
+        color: var(--accent);
+        line-height: 1;
+        text-align: center;
+      }
+      #lobby .vs {
+        text-align: center;
+        color: var(--dim);
+        font-size: clamp(15px, 1.9vw, 28px);
+      }
+      #lobby .vs b { color: var(--ink); }
+      #lobby .seatgrid {
+        flex: 1;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(15vw, 24vw));
+        gap: 2vh 2.5vw;
+        align-content: center;
+        justify-content: center;
+      }
+      #lobby .seat {
+        border: 2px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel);
+        min-height: 13vh;
+        display: flex; align-items: center; justify-content: center;
+        font-size: clamp(18px, 2.4vw, 38px);
+        font-weight: 600;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        padding: 0 1vw;
+      }
+      #lobby .seat.open { border-style: dashed; color: var(--dim); background: transparent; }
+      #lobby .seat.cpu { color: var(--dim); font-style: italic; }
+      /* the teams, side by side: a column per team (2-4), each at least 3 rows
+         and one more row for every extra player seated */
+      #lobby .teamgrid {
+        flex: 1;
+        display: flex; flex-wrap: nowrap; justify-content: center; align-items: flex-start;
+        gap: 2vw; padding-top: .5vh;
+        /* stay clear of the join card (bottom right) */
+        margin-right: 31vw;
+      }
+      #lobby .tcol {
+        display: flex; flex-direction: column; gap: .8vh;
+        width: min(22vw, calc((62vw - (var(--teams, 2) - 1) * 2vw) / var(--teams, 2)));
+      }
+      #lobby .tname {
+        text-align: center; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+        font-size: clamp(14px, 1.7vw, 26px); padding-bottom: .4vh; border-bottom: 4px solid var(--tc, var(--line));
+        color: var(--tc, var(--ink));
+      }
+      /* rows shrink as a team grows so even six a side fits the frame */
+      #lobby .tcol .seat {
+        --rowh: min(7vh, calc(36vh / var(--rows, 3)));
+        min-height: 0; height: var(--rowh);
+        font-size: min(2.2vw, calc(var(--rowh) * .5), calc(8.5vw / var(--teams, 2)));
+        border-left: 6px solid var(--tc, var(--line)); animation: seatin .35s ease-out;
+      }
+      #lobby .tcol .seat.open { border-left-style: dashed; }
+      /* a lobby of teams: compact header so the rows have the room */
+      #lobby.teams h1 { font-size: clamp(22px, 3vw, 44px); margin: 0; }
+      #lobby.teams .count { font-size: clamp(34px, 5.5vw, 84px); }
+      #lobby.teams .vs { font-size: clamp(13px, 1.5vw, 24px); }
+      @keyframes seatin { from { transform: scale(.85); opacity: 0; } to { transform: none; opacity: 1; } }
+      #lobby .joined { text-align: center; color: var(--ink); font-size: clamp(12px, 1.35vw, 22px); margin: .4vh 4vw .6vh; line-height: 1.35; }
+      #lobby .joined .w { color: var(--dim); font-style: italic; }
+
+      /* always-on join card, bottom right */
+      #joincard {
+        position: fixed;
+        right: 2.2vw; bottom: 2.2vh;
+        background: var(--panel);
+        border: 2px solid var(--accent);
+        border-radius: 16px;
+        padding: 1.6vh 1.4vw;
+        display: flex; align-items: center; gap: 1.2vw;
+        z-index: 5;
+      }
+      #joincard img { height: 17vh; min-height: 110px; width: auto; display: block; background: #101020; }
+      #joincard .txt { display: flex; flex-direction: column; gap: .6vh; max-width: 16vw; }
+      #joincard .txt b { font-size: clamp(14px, 1.7vw, 26px); }
+      #joincard .txt span { color: var(--dim); font-size: clamp(11px, 1.1vw, 17px); line-height: 1.35; }
+      #joincard .url { color: var(--accent2); font-weight: 600; }
+      #joincard .qcount { color: var(--accent); }
+      #joincard .mini {
+        display: flex; align-items: flex-start; gap: .6vw;
+        margin-top: .7vh;
+      }
+      #joincard .mini .col { display: flex; flex-direction: column; gap: .5vh; width: 2.6vw; }
+      #joincard .mini .col i { background: var(--tc, var(--panel)); border-color: var(--tc, var(--line)); }
+      #joincard .mini .col i.open { background: transparent; }
+      #joincard .mini .col.wait i { border-style: dotted; background: transparent; }
+      #joincard .mini i {
+        display: block; height: 1.7vh; min-height: 11px;
+        border: 2px solid var(--line);
+        border-radius: 4px;
+        background: var(--panel);
+      }
+      #joincard .mini i.open { border-style: dashed; opacity: .75; background: transparent; }
+      #joincard .mini i.cpu { opacity: .55; }
+
+      /* AFK banner: the host paused the game for a sleeping player */
+      #afk {
+        position: fixed; top: 2vh; left: 50%; transform: translateX(-50%);
+        background: var(--panel); border: 2px solid #e74c3c;
+        border-radius: 16px; padding: 1.6vh 2vw;
+        font-size: clamp(18px, 2.6vw, 40px); font-weight: 700;
+        color: #ffb3b3; z-index: 6; display: none;
+      }
+      #afk.on { display: block; }
+      #afk b { color: var(--accent); }
+
+      /* lobby bar (top, while waiting/starting) */
+      #lobbybar {
+        position: fixed; top: 0; left: 0; right: 0;
+        padding: 1.4vh 5vw;
+        background: linear-gradient(180deg, rgba(255,204,0,.16), transparent);
+        display: flex; align-items: center; gap: 2vw;
+        z-index: 4;
+      }
+      #lobbybar .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); animation: pulse 1.4s infinite; }
+      @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+      #lobbybar .msg { font-size: clamp(14px, 1.8vw, 26px); }
+      #lobbybar .msg b { color: var(--accent); }
+      #phase { margin-left: auto; color: var(--dim); font-size: clamp(11px, 1.2vw, 18px); }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <section class="slide" id="commentary">
+        <h1><span class="hl">Round report</span></h1>
+        <div class="lines" id="clines"></div>
+      </section>
+
+      <section class="slide" id="scoreboard">
+        <h1><span class="hl">All-time</span> top players</h1>
+        <div class="tbl" id="sbody"></div>
+      </section>
+
+      <section class="slide" id="howto">
+        <h1><span class="hl">How to play</span></h1>
+        <ol>
+          <li>Scan the <span class="key">QR</span> — or open the link — and join the queue.</li>
+          <li>When your turn comes, name your team and your four hogs.</li>
+          <li><span class="key">◀ ▶</span> walk &nbsp;·&nbsp; <span class="key">▲</span> aim up &nbsp;·&nbsp; <span class="key">J</span> jump</li>
+          <li>Steer the <span class="key">Pointer</span> arrows, <span class="key">click</span> to place, then hold <span class="key">FIRE</span>.</li>
+          <li>Last hedgehog standing wins. Good luck!</li>
+        </ol>
+      </section>
+
+      <section class="slide" id="lobby">
+        <h1><span class="hl">Next game</span> starting</h1>
+        <div class="count" id="lobbycount"></div>
+        <div class="vs" id="lobbyvs"></div>
+        <div class="joined" id="lobbyjoined"></div>
+        <div class="seatgrid" id="seats"></div>
+      </section>
+    </div>
+
+    <div id="afk">
+      <b id="afkteam"></b> <span id="afkmsg"></span>
+    </div>
+
+    <div id="lobbybar" hidden>
+      <span class="dot"></span>
+      <span class="msg" id="lobbymsg"></span>
+      <span id="phase"></span>
+    </div>
+
+    <div id="joincard">
+      <img src="/api/queue/qr" alt="Join QR" />
+      <div class="txt">
+        <b>Play on your phone</b>
+        <span class="qcount" id="qcount"></span>
+        <span>Scan to join the queue — the next open seat is yours.</span>
+        <span class="mini" id="miniseats"></span>
+        <span class="url" id="joinurl"></span>
+      </div>
+    </div>
+
+    <script type="module">
+      const SLIDE_MS = 9000;
+      const slides = [...document.querySelectorAll(".slide")];
+      const lobbySlide = slides.find((s) => s.id === "lobby");
+      const cycle = slides.filter((s) => s.id !== "lobby");
+      let idx = 0;
+      let cycleTimer = 0;
+      // #commentary / #scoreboard / #howto locks one slide (screenshots/tests)
+      const lock = location.hash.slice(1);
+      const lockIdx = slides.findIndex((s) => s.id === lock);
+      function show(i) {
+        slides.forEach((s, k) => s.classList.toggle("on", k === i));
+      }
+      function startCycle() {
+        if (cycleTimer) return;
+        cycleTimer = setInterval(() => {
+          idx = (idx + 1) % cycle.length;
+          show(slides.indexOf(cycle[idx]));
+        }, SLIDE_MS);
+      }
+      function stopCycle() {
+        if (cycleTimer) { clearInterval(cycleTimer); cycleTimer = 0; }
+      }
+      show(lockIdx >= 0 ? lockIdx : slides.indexOf(cycle[0]));
+      if (lockIdx < 0) startCycle();
+
+      // player screen names reach the overlay unescaped (the name filter keeps
+      // punctuation): never interpolate them into innerHTML as-is
+      const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+      const urlEl = document.getElementById("joinurl");
+      urlEl.textContent = location.origin + "/";
+
+      let currentData = null;
+
+      // seat grid helpers: filled seats carry the team name (CPU fillers are
+      // flagged), the remainder up to capacity renders as open seats
+      function seatList(roster) {
+        const cap = Math.max(0, roster?.capacity ?? 0);
+        const seats = (roster?.seats ?? []).slice(0, cap || roster?.seats?.length || 4);
+        while (cap && seats.length < cap) seats.push(null);
+        return seats.length ? seats : [null, null, null, null].slice(0, cap || 4);
+      }
+      const cssColor = (n) => "#" + (Number(n) & 0xffffff).toString(16).padStart(6, "0");
+      function fillGrid(el, mini) {
+        el.replaceChildren();
+        const roster = currentData?.roster;
+        if (roster?.teams?.length) {
+          // teams side by side: each at least 3 rows (hogs), growing by one row
+          // for every extra player seated, and shrinking again as they leave
+          if (!mini) {
+            el.className = "teamgrid";
+            el.style.setProperty("--teams", roster.teams.length);
+            el.style.setProperty("--rows", Math.max(3, ...roster.teams.map((t) => t.seats.length)));
+            el.closest("#lobby")?.classList.add("teams");
+          }
+          for (const t of roster.teams) {
+            const col = document.createElement("div");
+            col.className = mini ? "col" : "tcol";
+            col.style.setProperty("--tc", cssColor(t.color));
+            if (!mini) {
+              const h = document.createElement("div");
+              h.className = "tname"; h.textContent = t.name;
+              col.appendChild(h);
+            }
+            for (const seat of t.seats) {
+              const d = document.createElement(mini ? "i" : "div");
+              if (mini) d.className = seat ? "" : "open";
+              else if (seat) { d.className = "seat"; d.textContent = seat.name; }
+              else { d.className = "seat open"; d.textContent = "Open"; }
+              col.appendChild(d);
+            }
+            el.appendChild(col);
+          }
+          if (mini && roster.waiting?.length) {
+            const col = document.createElement("div");
+            col.className = "col wait";
+            for (let i = 0; i < roster.waiting.length; i++) col.appendChild(document.createElement("i"));
+            el.appendChild(col);
+          }
+          return;
+        }
+        if (!mini) { el.className = "seatgrid"; el.closest("#lobby")?.classList.remove("teams"); }
+        const seats = seatList(roster);
+        for (const s of seats) {
+          const d = document.createElement(mini ? "i" : "div");
+          if (!mini) {
+            if (!s) { d.className = "seat open"; d.textContent = "Open"; }
+            else if (s.cpu) { d.className = "seat cpu"; d.textContent = s.name; }
+            else d.className = "seat", d.textContent = s.name;
+          } else {
+            d.className = !s ? "open" : s.cpu ? "cpu" : "";
+          }
+          el.appendChild(d);
+        }
+      }
+      function renderSeats(data) {
+        currentData = data;
+        fillGrid(document.getElementById("seats"), false);
+        fillGrid(document.getElementById("miniseats"), true);
+        const n = data.queue ?? 0;
+        document.getElementById("qcount").textContent =
+          n > 0 ? `Join in (${n} in queue)` : "Be first in the queue";
+      }
+
+      // the lobby slide owns the screen while a round is filling; the cycle
+      // resumes for the inter-game slate
+      let lobbyActive = false;
+      function setLobbyActive(on) {
+        if (on === lobbyActive) return;
+        lobbyActive = on;
+        if (on) { stopCycle(); show(slides.indexOf(lobbySlide)); }
+        else { show(slides.indexOf(cycle[0])); idx = 0; startCycle(); }
+      }
+
+      function renderLobbySlide(data) {
+        const waiting = data.phase === "lobby" || data.phase === "countdown";
+        setLobbyActive(waiting && lockIdx < 0);
+        const countEl = document.getElementById("lobbycount");
+        const vsEl = document.getElementById("lobbyvs");
+        const joinedEl = document.getElementById("lobbyjoined");
+        if (!waiting) { countEl.textContent = ""; vsEl.textContent = ""; joinedEl.textContent = ""; return; }
+        const roster = data.roster ?? {};
+        // everyone who is in, as they arrive: seated players per team, then
+        // anyone still waiting for a partner (players are seated two at a time)
+        if (roster.teams?.length) {
+          const bits = roster.teams
+            .map((t) => ({ t, names: t.seats.filter(Boolean).map((x) => x.name) }))
+            .filter((x) => x.names.length)
+            .map((x) => `<b style="color:${cssColor(x.t.color)}">${escHtml(x.t.name)}</b> ${x.names.map(escHtml).join(", ")}`);
+          const wait = (roster.waiting ?? []).map((w) => escHtml(w.name));
+          joinedEl.innerHTML = (bits.length ? bits.join(" &nbsp;·&nbsp; ") : "")
+            + (wait.length ? `${bits.length ? "<br>" : ""}<span class="w">Waiting for a partner: ${wait.join(", ")}</span>` : "");
+        } else {
+          joinedEl.textContent = "";
+        }
+        const inCount = roster.joined ?? (roster.seats ?? []).filter((s) => s && !s.cpu).length;
+        if (data.phase === "countdown" && data.countdownEndsAt) {
+          const left = Math.ceil((data.countdownEndsAt - Date.now()) / 1000);
+          if (left > 0) {
+            countEl.textContent = `${left}s`;
+            vsEl.textContent = inCount
+              ? `Starting soon — ${inCount} in. Join now to be seated!`
+              : "Get on your phone and grab a seat!";
+          } else {
+            countEl.textContent = "";
+            vsEl.textContent = "Game starting…";
+          }
+        } else {
+          countEl.textContent = "";
+          vsEl.textContent = inCount
+            ? `Lobby open — ${inCount} in. Scan the code to jump in!`
+            : "Lobby open — scan the code to jump in!";
+        }
+      }
+      setInterval(() => { if (currentData) renderLobbySlide(currentData); }, 500);
+
+      function renderCommentary(data) {
+        const wrap = document.getElementById("clines");
+        wrap.replaceChildren();
+        const lines = data.lastgame?.lines ?? [];
+        if (!lines.length) {
+          const d = document.createElement("div");
+          d.className = "line";
+          d.textContent = "First round of the session — be there!";
+          wrap.appendChild(d);
+          return;
+        }
+        for (const line of lines) {
+          const d = document.createElement("div");
+          d.className = "line";
+          const isWin = /^Winner|^Draw|wins!|ExAequo/.test(line);
+          if (isWin) d.classList.add("winner");
+          d.textContent = line;
+          wrap.appendChild(d);
+        }
+      }
+
+      function renderScoreboard(data) {
+        const body = document.getElementById("sbody");
+        body.replaceChildren();
+        const head = ["#", "Player", "Wins", "Kills", "Games"].map((h) => {
+          const d = document.createElement("div");
+          d.className = "head";
+          d.textContent = h;
+          return d;
+        });
+        head.forEach((h) => body.appendChild(h));
+        const rows = data.ladder ?? [];
+        if (!rows.length) {
+          const d = document.createElement("div");
+          d.style.gridColumn = "1 / -1";
+          d.style.color = "var(--dim)";
+          d.textContent = "No games recorded yet — the ladder starts today.";
+          body.appendChild(d);
+          return;
+        }
+        rows.forEach((r, i) => {
+          const cells = [String(i + 1), r.name, String(r.wins), String(r.kills), String(r.games)];
+          cells.forEach((c, ci) => {
+            const d = document.createElement("div");
+            if (ci === 0) d.className = "rank";
+            else if (ci >= 2) d.className = "num";
+            d.textContent = c;
+            body.appendChild(d);
+          });
+        });
+      }
+
+      function renderLobby(data) {
+        const bar = document.getElementById("lobbybar");
+        const msg = document.getElementById("lobbymsg");
+        const phase = document.getElementById("phase");
+        const waiting = data.phase === "lobby" || data.phase === "countdown";
+        bar.hidden = !waiting;
+        if (!waiting) { phase.textContent = data.phase === "ingame" ? "live game" : "intermission"; return; }
+        if (data.phase === "countdown" && data.countdownEndsAt) {
+          const left = Math.max(0, Math.ceil((data.countdownEndsAt - Date.now()) / 1000));
+          // "last chance" only while the round can still take players
+          const canJoin = (data.openSeats ?? 0) > 0;
+          msg.innerHTML = left > 0
+            ? (canJoin
+              ? `Game starts in <b>${left}s</b> — last chance to scan!`
+              : `Game starts in <b>${left}s</b> — lobby locked`)
+            : "Starting…";
+        } else {
+          msg.textContent = "Lobby open — scan the code to jump in!";
+        }
+        phase.textContent = `${data.queue} in queue`;
+      }
+
+      async function poll() {
+        try {
+          const r = await fetch("/api/queue/state");
+          const data = await r.json();
+          renderSeats(data);
+          renderCommentary(data);
+          renderScoreboard(data);
+          renderLobby(data);
+          renderLobbySlide(data);
+          renderAfk(data);
+        } catch {}
+      }
+      // the host paused the game for a sleeping player: show who has to
+      // show up and how long they have before the turn is skipped
+      function renderAfk(data) {
+        const el = document.getElementById("afk");
+        const a = data.turnafk;
+        if (!a) { el.classList.remove("on"); return; }
+        const left = Math.max(0, Math.ceil((a.endsAt - Date.now()) / 1000));
+        document.getElementById("afkteam").textContent = a.team;
+        document.getElementById("afkmsg").textContent =
+          `wake up! your turn continues unless you show up in ${left}s`;
+        el.classList.add("on");
+      }
+      poll();
+      setInterval(poll, 4000);
+      // the commentary slide is freshest right after a round: re-render on
+      // every poll regardless of which slide is showing
+      setInterval(() => { if (currentData) renderCommentary(currentData); }, 4200);
+    </script>
+  </body>
+</html>

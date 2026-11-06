@@ -1,0 +1,72 @@
+<!doctype html>
+<!-- /stream/stats — M12 overlay view: last game's report.
+     OBS browser source: transparent background, fixed 1920x1080.
+     Options: ?bg=dark opaque, ?scale=x shrink. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>hw · last game</title>
+    <style>
+      :root { --ink: #f2ead8; --dim: #b7aed6; --accent: #ffcc00; --line: rgba(120,110,190,.55); --panel: rgba(23,19,53,.78); }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { background: transparent; }
+      body {
+        width: 100vw; height: 100vh; overflow: hidden;
+        color: var(--ink); font-family: "Segoe UI", system-ui, sans-serif;
+        display: flex; flex-direction: column; gap: 1.4vh;
+        padding: 3.5vh 3vw; justify-content: center;
+        text-shadow: 0 2px 6px rgba(0,0,0,.85);
+      }
+      body.bg { background: #0d0b1e; text-shadow: none; }
+      h1 { font-size: clamp(28px, 3.8vw, 54px); }
+      h1 .hl { color: var(--accent); }
+      .lines {
+        display: flex; flex-direction: column; gap: 1.1vh;
+        max-height: 68vh; overflow: hidden;
+      }
+      .line {
+        background: var(--panel); border: 1px solid var(--line);
+        border-radius: 12px; padding: 1.3vh 1.4vw;
+        font-size: clamp(15px, 1.9vw, 28px);
+        width: fit-content; max-width: 70vw;
+      }
+      .line.winner { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+      .standby { color: var(--dim); font-size: clamp(15px, 1.9vw, 28px); font-style: italic; }
+    </style>
+  </head>
+  <body>
+    <h1><span class="hl">Last game</span></h1>
+    <div class="lines" id="clines"></div>
+    <script type="module">
+      const q = new URLSearchParams(location.search);
+      if (q.get("bg") === "dark") document.body.classList.add("bg");
+      const s = Number(q.get("scale") ?? 1);
+      if (s !== 1) document.body.style.zoom = String(s);
+
+      function render(d) {
+        const wrap = document.getElementById("clines");
+        wrap.replaceChildren();
+        const lines = d.lastgame?.lines ?? [];
+        if (!lines.length) {
+          const el = document.createElement("div");
+          el.className = "standby";
+          el.textContent = "First round of the session — stay tuned.";
+          wrap.appendChild(el);
+          return;
+        }
+        for (const line of lines) {
+          const el = document.createElement("div");
+          el.className = "line";
+          if (/^Winner|^Draw|wins!|ExAequo/.test(line)) el.classList.add("winner");
+          el.textContent = line;
+          wrap.appendChild(el);
+        }
+      }
+      async function poll() {
+        try { render(await (await fetch("/api/queue/state")).json()); } catch {}
+      }
+      poll();
+      setInterval(poll, 2000);
+    </script>
+  </body>
+</html>

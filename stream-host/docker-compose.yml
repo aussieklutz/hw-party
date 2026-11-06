@@ -1,0 +1,72 @@
+# stream-host compose — the automated, self-healing stream loop.
+#
+# Two streaming modes (pick one on the `stream` service via env):
+#
+#   OBS mode (M12 default here): STREAM_DISPLAYS=1 + FEED_URL.
+#     The container runs Xvfb + PulseAudio + the headless orchestrator +
+#     the engine; feed.mjs pushes video+audio to the RTMP server ONLY while
+#     a game is live. OBS on the streamer machine consumes it with a Media
+#     Source (rtmp://<this-host>:1935/live/game) and layers the hwstream
+#     worker's overlay views (/stream/scoreboard|stats|splash|seats.html)
+#     as browser sources. Scene switching is OBS's job.
+#
+#   Legacy mode (M11.2, no OBS): STREAM_VIDEO=1 + RTMP_URL.
+#     The container composites everything itself (slate in the feed via a
+#     chromium kiosk, window raising per phase) and pushes the finished
+#     feed straight to the RTMPS target.
+#
+#   WORKER_URL       the hwstream worker this host runs its rounds on
+#   ROOM_MODE        classic | fixed | dynamic | teams | imposter (game mode via env)
+#                      teams    everyone is seated; 2 teams up to 12 players, 3 up to 18,
+#                               4 up to 24 (Red, Blue, Yellow, Green), rebalanced as it grows
+#                      imposter 6-12 players, two teams (Red/Blue), ONE secret traitor on each
+#                               team. Players are let in as they arrive but seated two at a
+#                               time (one per team); a seated player leaving unseats the latest
+#                               player on the other team; anyone still unseated at the start
+#                               goes to the front of the queue for the next game.
+#                    A team fields at least 3 hogs (CPU fills the rest) and one more per player.
+#   MAX_PLAYERS      lobby cap (imposter 12, teams 24)
+#   POP_COUNT        players popped from the queue per round (classic/fixed/dynamic)
+#   FEED_URL         OBS-mode push target (default the local mediamtx)
+#   RTMP_URL         legacy-mode live push (rtmps://a.rtmp.youtube.com/live2/<key>)
+#   STREAM_HOST_SECRET  must match the worker's STREAM_HOST_SECRET binding
+#
+# The game data directory is volume-mounted read-only; bake it into the image
+# instead if you want a fully self-contained deployment.
+services:
+  stream:
+    build:
+      context: ..
+      dockerfile: stream-host/Dockerfile
+    image: localhost/hw-streamhost:latest
+    restart: always
+    network_mode: host
+    environment:
+      # OBS mode: displays + pulse only; the feed is phase-gated by feed.mjs
+      STREAM_DISPLAYS: "1"
+      STREAM_VIDEO: "0"
+      FEED_URL: ${FEED_URL:-rtmp://127.0.0.1:1935/live/game}
+      STREAM_WIDTH: ${STREAM_WIDTH:-1920}
+      STREAM_HEIGHT: ${STREAM_HEIGHT:-1080}
+      STREAM_FPS: ${STREAM_FPS:-30}
+      WORKER_URL: ${WORKER_URL:?set WORKER_URL to your stream worker}
+      ROOM_MODE: ${ROOM_MODE:-dynamic}
+      ROOM_SLOTS: ${ROOM_SLOTS:-4}
+      POP_COUNT: ${POP_COUNT:-2}
+      CPU_TIER: ${CPU_TIER:-5}
+      LOBBY_WAIT_MS: ${LOBBY_WAIT_MS:-180000}
+      ROUND_WAIT_MS: ${ROUND_WAIT_MS:-30000}
+      SLATE_MS: ${SLATE_MS:-15000}
+      STREAM_HOST_SECRET: ${STREAM_HOST_SECRET}
+    volumes:
+      - ../share/hedgewars/Data:/data:ro
+      - ./recordings:/data/out
+
+  # the local RTMP endpoint OBS pulls from: a single static server, zero
+  # config — ffmpeg publishes rtmp://127.0.0.1:1935/live/game while the game
+  # is live, and the path simply has no track (OBS shows nothing) otherwise.
+  # Only needed for OBS mode; the legacy mode pushes straight to YouTube.
+  mediamtx:
+    image: ghcr.io/bluenviron/mediamtx:1.12.0
+    restart: always
+    network_mode: host

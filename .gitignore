@@ -83,3 +83,7 @@ xcuserdata
 Testing/*
 gameServer2/rls
 gameServer2/target
+
+# stream host recordings and live E2E test artifacts
+stream-host/recordings/
+.testshots/

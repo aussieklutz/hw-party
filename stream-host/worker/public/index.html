@@ -1,0 +1,773 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>Hedgewars Party</title>
+    <style>
+      @font-face {
+        font-family: "HWFont";
+        src: url("/assets/fonts/DejaVuSans-Bold.ttf") format("truetype");
+        font-display: swap;
+      }
+      :root {
+        --hw-bg: #14142b;
+        --hw-panel: #26264a;
+        --hw-panel-2: #1c1c38;
+        --hw-border: #4b4b7f;
+        --hw-text: #e8e8ff;
+        --hw-dim: #9a9ac0;
+        --hw-accent: #ffa000;
+        --hw-accent-2: #c93;
+      }
+      body { font-family: "HWFont", system-ui, sans-serif; background: #151426 url("/assets/site/background.jpg") center bottom repeat-x; background-attachment: fixed; color: var(--hw-text); margin: 0; padding: 1rem; }
+      body.ingame { background: radial-gradient(1200px 800px at 50% -10%, #232345, var(--hw-bg)); }
+      #banner { width: 100%; aspect-ratio: 853 / 160; background: url("/assets/site/header2.png") no-repeat center / contain; margin: 0.2rem 0 0.8rem; }
+      body.ingame #banner { display: none; }
+      .card { background: rgba(255,255,255,0.95); color: #22262e; border-radius: 12px; padding: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.45); }
+      .card input { background: #fff; border: 1px solid #b9b9c9; color: #22262e; }
+      .card input::placeholder { color: #8a8f9c; }
+      .card button { background: linear-gradient(#ffbe30, var(--hw-accent)); color: #3a2000; border-color: #c77e00; font-weight: bold; }
+      button { font-family: inherit; font-size: 1.2rem; padding: 0.8rem; margin: 0.25rem; border-radius: 10px; border: 1px solid var(--hw-border); background: linear-gradient(#3a3a68, var(--hw-panel)); color: var(--hw-text); box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 2px 0 #101020; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+      button:active { transform: translateY(1px); box-shadow: inset 0 1px 3px rgba(0,0,0,.5); }
+      button:disabled { opacity: 0.3; }
+      #pad { display: grid; grid-template-columns: repeat(4, 64px); gap: 4px; margin: 0.4rem auto; touch-action: none; user-select: none; }
+      #status { font-weight: bold; color: var(--hw-dim); }
+      #active { font-size: 1.1rem; color: var(--hw-accent); }
+      #controls { display: flex; flex-direction: column; gap: 8px; }
+      #controls[hidden] { display: none; }
+      .padgroup { display: flex; flex-direction: column; gap: 3px; align-items: center; }
+      .padlabel { font-size: 0.8rem; font-weight: bold; color: var(--hw-dim); letter-spacing: 0.08em; text-transform: uppercase; }
+      #cpad { display: grid; grid-template-columns: repeat(4, 64px); gap: 4px; touch-action: none; user-select: none; }
+      #cclick { margin: 0; padding: 10px 2px; font-size: 0.95rem; border-color: var(--hw-accent-2); }
+      .hrow { display: flex; gap: 6px; }
+      .hrow button { flex: 1; min-height: 48px; margin: 0; padding: 10px 4px; }
+      .hrow #fire { flex: 2; font-size: 1.4rem; font-weight: bold; }
+      @media (orientation: landscape) {
+        #controls { display: grid; grid-template-columns: minmax(300px, 1.1fr) 1.4fr; grid-template-rows: repeat(4, auto); align-content: start; gap: 6px; }
+        #pgroup-pointer { grid-column: 1; grid-row: 1 / span 4; justify-content: center; }
+        #pgroup-move, #controls .hrow { grid-column: 2; margin: 0; }
+        .hrow button { min-height: 44px; }
+        #pad { grid-template-columns: repeat(4, 56px); gap: 3px; }
+        #cpad { grid-template-columns: repeat(4, 56px); gap: 3px; }
+      }
+      body.ingame #status { display: none; }
+      #weaponsBtn { font-size: 1.2rem; }
+      #weaponspanel { position: fixed; inset: 0; background: rgba(16,16,34,0.97); display: none; flex-direction: column; padding: 8px; z-index: 10; }
+      #weaponspanel.open { display: flex; }
+      #wgridwrap { flex: 1; overflow-y: auto; }
+      .wgrid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; }
+      .whalfwrap { display: flex; gap: 6px; }
+      .whalfwrap .wgrid { flex: 1; grid-template-columns: repeat(5, 1fr); }
+      .wcell { background: var(--hw-panel-2); border: 1px solid var(--hw-border); border-radius: 8px; color: var(--hw-text); padding: 6px 2px 4px; display: flex; flex-direction: column; align-items: center; gap: 3px; overflow: hidden; }
+      .wcell:not(.dim):active { border-color: var(--hw-accent); }
+      .wcell.dim { opacity: 0.25; }
+      .wcell.switcher { border-color: var(--hw-accent-2); }
+      .wcell.noweap { border-color: var(--hw-accent); }
+      .wnoweap { font-size: 1.6rem; color: var(--hw-dim); height: 32px; display: flex; align-items: center; justify-content: center; flex: none; }
+      .wicon { width: 32px; height: 32px; background-image: url("/assets/graphics/Ammos_base.png"); background-repeat: no-repeat; image-rendering: pixelated; flex: none; }
+      .wname { font-size: 0.55rem; line-height: 1.1; color: var(--hw-dim); text-align: center; }
+      #teamform input { display: block; width: 100%; box-sizing: border-box; margin: 4px 0; padding: 8px; font-size: 16px; font-family: inherit; border-radius: 6px; }
+      #teamform h3 { margin: 8px 0 2px; }
+      #teamform { overflow-y: auto; max-height: calc(100dvh - 11rem); -webkit-overflow-scrolling: touch; }
+      @media (orientation: landscape) { #teamform { max-height: calc(100dvh - 15rem); } }
+      .pickers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 8px 0; }
+      .card .pick { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; margin: 0; font-family: inherit; background: linear-gradient(#3a3a68, var(--hw-panel)); color: var(--hw-text); border-color: var(--hw-border); font-weight: normal; }
+      .pickicon { width: 44px; height: 30px; background-repeat: no-repeat; image-rendering: pixelated; flex: none; }
+      .pickicon#graveIcon { width: 32px; height: 32px; }
+      .pickicon.pickvoice { color: var(--hw-accent); font-size: 1.4rem; width: 44px; height: 30px; display: flex; align-items: center; justify-content: center; }
+      .picklabel { font-size: 0.6rem; line-height: 1.1; color: var(--hw-dim); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    <div id="banner" role="img" aria-label="Hedgewars"></div>
+    <div id="join" class="card">
+      <input id="code" maxlength="6" placeholder="Room code" style="text-transform:uppercase; font-size:1.5rem" />
+      <button id="joinBtn">Join</button>
+    </div>
+    <div id="queueui" class="card" hidden>
+      <h3>Stream queue</h3>
+      <p id="whoami" style="margin:.2rem 0 .6rem"></p>
+      <button id="queueBtn" type="button">Join the Queue</button>
+      <p id="queuePos" style="font-size:1.1rem" hidden></p>
+    </div>
+
+    <!-- the team form is shared: build it while queued (pre-registration) or
+         in the lobby if you skipped it -->
+    <div id="teamform" class="card" hidden>
+      <h3 id="tfTitle">Build your team</h3>
+      <input id="tname" maxlength="40" placeholder="Team name (callsign)" />
+      <input id="hog0" maxlength="50" placeholder="Hedgehog 1 name" />
+      <input id="hog1" maxlength="50" placeholder="Hedgehog 2 name" />
+      <input id="hog2" maxlength="50" placeholder="Hedgehog 3 name" />
+      <input id="hog3" maxlength="50" placeholder="Hedgehog 4 name" />
+      <div class="pickers">
+        <button id="flagPick" class="pick" type="button"><span class="pickicon" id="flagIcon"></span><span class="picklabel" id="flagName"></span></button>
+        <button id="gravePick" class="pick" type="button"><span class="pickicon" id="graveIcon"></span><span class="picklabel" id="graveName"></span></button>
+        <button id="voicePick" class="pick" type="button"><span class="pickicon pickvoice">â™ª</span><span class="picklabel" id="voiceName"></span></button>
+      </div>
+      <button id="teamBtn">Save Team</button>
+      <p id="teamSaved" style="color:var(--accent); display:none">Team ready — waiting for your seatâ€¦</p>
+    </div>
+
+    <div id="game" hidden>
+      <p id="status">connectingâ€¦</p>
+      <p id="active">waiting for turn</p>
+      <p id="seatnote" hidden style="margin:0.3rem 0;padding:6px 12px;border-radius:8px;background:#14304a;color:#cfe8ff"></p>
+      <p id="rolenote" hidden style="margin:0.3rem 0;padding:6px 12px;border-radius:8px;background:#4a1020;color:#ffd7de;font-weight:bold"></p>
+
+      <div id="controls" hidden>
+        <div class="padgroup" id="pgroup-pointer">
+          <div class="padlabel">Pointer</div>
+          <div id="cpad">
+            <span></span><button data-cur="up">▲</button><span></span><button id="cclick">Click</button>
+            <button data-cur="left">◀</button><button data-cur="down">▼</button><button data-cur="right">▶</button><span></span>
+          </div>
+        </div>
+        <div class="padgroup" id="pgroup-move">
+          <div class="padlabel">Move/Aim</div>
+          <div id="pad">
+            <span></span><button data-act="+up">▲</button><span></span><button data-act="J">Jump</button>
+            <button data-act="+left">◀</button><button data-act="+down">▼</button><button data-act="+right">▶</button><span></span>
+          </div>
+        </div>
+        <div class="hrow">
+          <button data-act="j">Long Jump</button><button data-act="s">Switch Hog</button>
+        </div>
+        <div class="hrow">
+          <button id="fire">Fire (hold)</button><button id="weaponsBtn" disabled>Weapons</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="weaponspanel">
+      <div class="hrow">
+        <strong style="flex:1">Weapons</strong>
+        <button id="wclose" style="margin:0">Close</button>
+      </div>
+      <div id="wgridwrap"></div>
+    </div>
+
+    <script type="module">
+      import { HW_AMMOMENU, HW_WEAPONS } from "/weapons.js";
+
+      const qs = new URLSearchParams(location.search);
+      const codeEl = document.getElementById("code");
+      let code = qs.get("r") ? qs.get("r").toUpperCase() : "";
+      if (code) codeEl.value = code;
+
+      // stream mode: no room code in the URL — the page is the queue.
+      // Direct room links (?r=CODE) keep working for private rooms.
+      const queueCard = document.getElementById("queueui");
+      const joinCard = document.getElementById("join");
+      const teamformEl = document.getElementById("teamform");
+      const teamSavedEl = document.getElementById("teamSaved");
+      const tfTitle = document.getElementById("tfTitle");
+      let queueWs = null;
+      let inRoom = false;
+      let queued = false;
+      let teamSaved = false;
+      let savedTeamConfig = null;
+      if (!code) {
+        queueCard.hidden = false;
+        joinCard.hidden = true;
+      }
+
+      // The stream decides your screen name: your account's (sign in with a
+      // magic link on the signup site) or, without one, AnonAlpha/AnonBeta/...
+      // handed out when you join the queue. It cannot be typed.
+      let identity = { registered: false, name: null, signInUrl: null };
+      const whoEl = document.getElementById("whoami");
+      function showIdentity() {
+        whoEl.replaceChildren();
+        const strong = (t) => { const b = document.createElement("b"); b.textContent = t; return b; };
+        if (identity.registered) {
+          whoEl.append("Signed in as ", strong(identity.name), " ");
+          const out = document.createElement("a");
+          out.href = "#"; out.textContent = "sign out";
+          out.onclick = async (e) => {
+            e.preventDefault();
+            await fetch("/api/auth/logout", { method: "POST" });
+            location.reload();
+          };
+          whoEl.append(out);
+        } else {
+          if (identity.assigned) whoEl.append("Playing as ", strong(identity.assigned), " (guest). ");
+          else whoEl.append("Playing as a guest (AnonAlpha, AnonBeta...). ");
+          if (identity.signInUrl) {
+            const a = document.createElement("a");
+            a.href = identity.signInUrl;
+            a.textContent = "Sign in to use your own screen name";
+            whoEl.append(a);
+          }
+        }
+      }
+      if (!code) {
+        fetch("/api/identity").then((r) => r.json()).then((d) => { identity = { ...identity, ...d }; showIdentity(); }).catch(() => {});
+      }
+      // the name the stream gave us fills the (locked) team-name box
+      function lockScreenName(name) {
+        if (!name) return;
+        const el = document.getElementById("tname");
+        el.value = name;
+        el.disabled = true;
+        if (!identity.registered) identity.assigned = name;
+        showIdentity();
+      }
+
+      function showQueuePosition(position, total) {
+        queueCard.hidden = false;
+        joinCard.hidden = true;
+        document.getElementById("game").hidden = true;
+        inRoom = false;
+        queued = position > 0;
+        autoClaimed = false; // back in line: the next room claims afresh
+        teamformEl.hidden = !queued || (streamFlow && isSeatMode());
+        if (queued) {
+          tfTitle.textContent = streamFlow ? "Name your hedgehogs while you wait" : "Build your team while you wait";
+          document.getElementById("teamBtn").textContent = teamSaved ? "Update team" : "Save team";
+          teamSavedEl.style.display = teamSaved ? "block" : "none";
+        }
+        const pos = document.getElementById("queuePos");
+        pos.hidden = position <= 0;
+        if (position > 0) {
+          pos.textContent = position === 1
+            ? "You are NEXT — get ready!"
+            : `You are #${position} of ${total} in line`;
+        } else {
+          pos.textContent = "Waiting for the next roundâ€¦";
+        }
+      }
+
+      function buildTeamConfig() {
+        const name = document.getElementById("tname").value.trim();
+        if (!name) { alert("Enter a team name first"); return null; }
+        const hogs = [0, 1, 2, 3].map((i) => {
+          const el = document.getElementById("hog" + i);
+          return { name: el.value.trim() || `Hog ${i + 1}`, hat: "NoHat" };
+        });
+        return {
+          name,
+          hogs,
+          flag: teamData ? teamData.flags[flagIdx].name : "hedgewars",
+          grave: teamData ? teamData.graves[graveIdx].name : "Statue",
+          voice: teamData ? teamData.voices[voiceIdx].name : "Default",
+        };
+      }
+
+      async function joinQueue() {
+        try { if (queueWs) { queueWs.onclose = null; queueWs.close(); } } catch {}
+        const res = await fetch("/api/queue/join", { method: "POST" });
+        if (res.status === 409) {
+          // this account is already queued / seated: usually our own previous
+          // socket still closing, otherwise another device. Say so and retry.
+          const pos = document.getElementById("queuePos");
+          pos.hidden = false;
+          pos.textContent = "This account is already in the queue or a round (another device?). Retrying…";
+          setTimeout(joinQueue, 4000);
+          return;
+        }
+        if (!res.ok) { alert("queue join failed"); return; }
+        const data = await res.json().catch(() => ({}));
+        lockScreenName(data.name);
+        // during the countdown the queue admits on the spot
+        if (data.admitted && data.room) { enterRoom(data.room); return; }
+        const proto = location.protocol === "https:" ? "wss" : "ws";
+        queueWs = new WebSocket(`${proto}://${location.host}/api/queue/ws`);
+        queueWs.onopen = () => {
+          // re-send a previously built team (round releases keep it)
+          if (savedTeamConfig) sendQueueTeam(savedTeamConfig);
+        };
+        queueWs.onmessage = (e) => {
+          const m = JSON.parse(e.data);
+          if (m.type === "queue") {
+            // admitted before this socket connected: the state message
+            // carries the room (admission is per-player, never broadcast)
+            if (m.admitted && m.room) { enterRoom(m.room); return; }
+            showQueuePosition(m.position, m.total);
+          }
+          else if (m.type === "team-saved") { teamSaved = true; teamSavedEl.style.display = "block"; document.getElementById("teamBtn").textContent = "Update team"; }
+          else if (m.type === "admitted" && m.room) enterRoom(m.room);
+          else if (m.type === "phase" && m.mode && m.mode !== myMode) { myMode = m.mode; applyMode(); }
+          if (m.type === "phase" && m.phase === "countdown" && m.endsAt) {
+            const tick = () => {
+              const left = Math.max(0, Math.ceil((m.endsAt - Date.now()) / 1000));
+              const pos = document.getElementById("queuePos");
+              pos.hidden = false;
+              pos.textContent = left > 0 ? `Next round starts in ${left}sâ€¦` : "Startingâ€¦";
+            };
+            tick();
+            const iv = setInterval(() => { tick(); if (Date.now() >= m.endsAt) clearInterval(iv); }, 1000);
+          }
+        };
+        queueWs.onclose = () => setTimeout(joinQueue, 2000);
+      }
+      document.getElementById("queueBtn").onclick = joinQueue;
+
+      function sendQueueTeam(config) {
+        if (queueWs && queueWs.readyState === 1) queueWs.send(JSON.stringify({ type: "team", config }));
+      }
+
+      let entering = false;
+      async function enterRoom(roomCode) {
+        if (entering || inRoom) return;
+        entering = true;
+        try { if (queueWs) { queueWs.onclose = null; queueWs.close(); } } catch {}
+        const res = await fetch(`/api/rooms/${roomCode}/join`, { method: "POST" });
+        if (!res.ok) { entering = false; await joinQueue(); return; }
+        document.getElementById("join").hidden = true;
+        queueCard.hidden = true;
+        document.getElementById("game").hidden = false;
+        inRoom = true;
+        code = roomCode;
+        connect();
+        // a team pre-built in the queue registers itself immediately
+        if (savedTeamConfig) {
+          const t = setInterval(() => {
+            if (ws && ws.readyState === 1) {
+              clearInterval(t);
+              send({ type: "team", config: savedTeamConfig });
+              myTeam = savedTeamConfig.name;
+              teamformEl.hidden = true;
+              activeEl.textContent = "team registered — waiting for game";
+            }
+          }, 100);
+        }
+        if (teamData && !teamformEl.hidden) playVoiceSample();
+      }
+
+      let ws = null;
+      let mySid = null;
+      let myMode = "classic";
+      let myTeam = "";
+      let ammoStore = "";
+      let backoff = 1500;
+      let pingTimer = null;
+      const bannerEl = document.createElement("div");
+      bannerEl.style.cssText = "position:fixed;top:8px;left:50%;transform:translateX(-50%);background:#c0392b;color:#fff;padding:10px 18px;border-radius:10px;font-weight:bold;z-index:99;display:none;";
+      document.body.appendChild(bannerEl);
+
+      const voice = document.createElement("audio");
+      voice.preload = "auto";
+      voice.style.display = "none";
+      document.body.appendChild(voice);
+      {
+        const probe = document.createElement("audio");
+        voice.src = probe.canPlayType('audio/ogg; codecs="vorbis"')
+          ? "/assets/sounds/Comeonthen.ogg"
+          : "/assets/sounds/Comeonthen.m4a";
+      }
+      let audioUnlocked = false;
+      document.addEventListener("pointerdown", () => {
+        if (audioUnlocked) return;
+        audioUnlocked = true;
+        const vol = voice.volume;
+        voice.volume = 0;
+        voice.play().then(() => { voice.pause(); voice.currentTime = 0; voice.volume = vol; })
+                    .catch(() => { voice.volume = vol; });
+      }, { once: true, capture: true });
+      function playTurnVoice() {
+        if (!audioUnlocked) return;
+        voice.currentTime = 0;
+        voice.play().catch(() => {});
+      }
+
+      const padBtns = [...document.querySelectorAll("#pad button, #cpad button, [data-act]")];
+      const fireBtn = document.getElementById("fire");
+      const weaponsBtn = document.getElementById("weaponsBtn");
+      const activeEl = document.getElementById("active");
+      const statusEl = document.getElementById("status");
+      const controlsEl = document.getElementById("controls");
+
+      function connect() {
+        const proto = location.protocol === "https:" ? "wss" : "ws";
+        ws = new WebSocket(`${proto}://${location.host}/api/rooms/${code}/ws`);
+        ws.onopen = () => {
+          statusEl.textContent = "connected";
+          backoff = 1500;
+          // a frozen/killed page drops its socket: the DO reserved the seat
+          // by name, so re-send the saved claim to take it back mid-game
+          if (savedTeamConfig) {
+            send({ type: "team", config: savedTeamConfig });
+            myTeam = savedTeamConfig.name;
+          }
+        };
+        ws.onclose = () => {
+          statusEl.textContent = "disconnected — retryingâ€¦";
+          setTimeout(connect, backoff);
+          backoff = Math.min(backoff * 2, 5000);
+        };
+        ws.onmessage = (e) => {
+          const msg = JSON.parse(e.data);
+          if (msg.type === "hello") {
+            if (msg.sid) mySid = msg.sid;
+            if (msg.mode) { myMode = msg.mode; applyMode(); }
+            autoClaim();
+          } else if (msg.type === "state") {
+            if (msg.state === "released") {
+              // the round moved on while this socket was away: re-join the queue
+              try { if (ws) { ws.onclose = null; ws.close(); } } catch {}
+              mySid = null;
+              document.getElementById("seatnote").hidden = true;
+              if (code && !qs.get("r")) joinQueue();
+              else if (!code) joinQueue();
+              return;
+            }
+            const ingame = msg.state === "ingame";
+            document.body.classList.toggle("ingame", ingame);
+            // in-room pre-game: the form only shows if no prebuilt team rode
+            // in with the queue; in-game it always hides
+            teamformEl.hidden = ingame || (queued && teamSaved) || (streamFlow && isSeatMode());
+            if (!teamformEl.hidden) {
+              tfTitle.textContent = streamFlow ? "Name your hedgehogs" : "Register your team";
+              teamSavedEl.style.display = "none";
+            }
+            controlsEl.hidden = !ingame;
+            if (!ingame) document.getElementById("rolenote").hidden = true; // stale role from a past round
+            if (ingame) document.getElementById("seatnote").hidden = true;
+            if (!ingame) {
+              activeEl.textContent = typeof msg.countdown === "number"
+                ? `Game starts in ${msg.countdown}sâ€¦`
+                : "waiting for game";
+            }
+          } else if (msg.type === "released") {
+            // the round is over — the stream host sends everyone back to the
+            // queue for the next one
+            try { if (ws) { ws.onclose = null; ws.close(); } } catch {}
+            mySid = null;
+            // re-join the queue for the next round (fire-and-forget: this
+            // callback is not async and the module must never await here)
+            if (code && !qs.get("r")) joinQueue();
+            else if (!code) joinQueue();
+          } else if (msg.type === "weapons") {
+            ammoStore = msg.ammo || "";
+            weaponsBtn.disabled = false;
+            renderWeapons();
+          } else if (msg.type === "turn") {
+            const mine = msg.sid != null
+              ? (mySid != null && msg.sid === mySid)
+              : (myTeam && msg.team === myTeam);
+            activeEl.textContent = mine ? "YOUR TURN" : `turn: ${msg.team}`;
+            setControlsEnabled(!!mine);
+            // heartbeat: the host pauses the game and counts down when a
+            // sleeping phone stops pinging (buglist: player AFK countdown)
+            clearInterval(pingTimer);
+            pingTimer = mine
+              ? setInterval(() => send({ type: "ping" }), 2000)
+              : null;
+            if (mine) {
+              playTurnVoice();
+              if (document.hidden) {
+                bannerEl.textContent = "YOUR TURN - wake up!";
+                bannerEl.hidden = false;
+                setTimeout(() => { bannerEl.hidden = true; }, 4000);
+              }
+            }
+          } else if (msg.type === "seat") {
+            // where the lobby put this player: seated on a team, or in but
+            // waiting for a partner (players are seated two at a time)
+            const sn = document.getElementById("seatnote");
+            sn.textContent = msg.seated
+              ? `You are seated on the ${msg.team} team.`
+              : "You're in! Waiting for one more player so you can be seated together.";
+            sn.hidden = false;
+          } else if (msg.type === "notify") {
+            // private host -> this phone only (the imposter reveal): kept on
+            // screen for the whole game, with a short banner flash on arrival
+            const note = document.getElementById("rolenote");
+            note.textContent = String(msg.text ?? "");
+            note.hidden = !note.textContent;
+            if (note.textContent) {
+              bannerEl.textContent = note.textContent;
+              bannerEl.style.display = "block";
+              bannerEl.hidden = false;
+              setTimeout(() => { bannerEl.hidden = true; bannerEl.style.display = "none"; }, 6000);
+            }
+            if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+          } else if (msg.type === "afk") {
+            // host-driven AFK countdown for the active player
+            bannerEl.textContent = `YOUR TURN - respond now or the turn is skipped (${msg.seconds}s)`;
+            bannerEl.hidden = false;
+            const endsAt = (msg.endsAt ?? 0);
+            const tick = () => {
+              const left = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+              bannerEl.textContent = `YOUR TURN - respond now or the turn is skipped (${left}s)`;
+              if (left <= 0) bannerEl.hidden = true;
+            };
+            tick();
+            const iv = setInterval(() => {
+              tick();
+              if (endsAt - Date.now() <= 0) clearInterval(iv);
+            }, 1000);
+          }
+        };
+      }
+
+      // Who names what. Joining through the stream queue, the stream binds your
+      // screen name (your account's, or AnonAlpha...): it IS your team's name in
+      // the standard modes, and your hedgehog's name in the team and imposter
+      // modes (one player, one hog - so there is nothing else to type there and
+      // the seat is claimed for you). Party rooms keep typed names.
+      const streamFlow = !qs.get("r");
+      const isSeatMode = () => myMode === "teams" || myMode === "imposter";
+      let autoClaimed = false;
+      function autoClaim() {
+        if (autoClaimed || !streamFlow || !isSeatMode()) return;
+        const name = document.getElementById("tname").value.trim();
+        if (!name || !ws || ws.readyState !== 1) return;
+        autoClaimed = true;
+        savedTeamConfig = { name };
+        send({ type: "team", config: savedTeamConfig });
+        myTeam = name;
+        teamSaved = true;
+        teamformEl.hidden = true;
+        activeEl.textContent = "You're in - waiting for the game";
+      }
+      function applyMode() {
+        const seat = isSeatMode();
+        for (const id of ["hog0", "hog1", "hog2", "hog3"]) {
+          const el = document.getElementById(id);
+          if (el) el.hidden = seat;
+        }
+        const tname = document.getElementById("tname");
+        if (tname) {
+          if (streamFlow) tname.placeholder = seat ? "Your screen name (your hedgehog)" : "Your screen name (your team)";
+          else tname.placeholder = myMode === "teams" ? "Screen name (hog name)" : "Team name (callsign)";
+        }
+        if (streamFlow && seat) { teamformEl.hidden = true; autoClaim(); }
+      }
+      // the host's mode is known before the room: from the queue
+      async function refreshMode() {
+        try {
+          const st = await (await fetch("/api/queue/state")).json();
+          if (st.mode) { myMode = st.mode; applyMode(); }
+        } catch {}
+      }
+
+      function setControlsEnabled(enabled) {
+        padBtns.forEach((b) => (b.disabled = !enabled));
+        fireBtn.disabled = !enabled;
+        weaponsBtn.disabled = !enabled || !ammoStore;
+      }
+
+      function send(obj) {
+        if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+      }
+
+      for (const b of padBtns) {
+        const act = b.dataset.act;
+        if (!act) continue;  // pointer-pad buttons are wired separately below
+        const isHeld = act.startsWith("+");
+        b.onpointerdown = () => send({ type: "input", action: act });
+        if (isHeld) {
+          const release = "-" + act.slice(1);
+          b.onpointerup = b.onpointercancel = () => send({ type: "input", action: release });
+        }
+      }
+
+      let firing = false;
+      fireBtn.onpointerdown = () => { firing = true; send({ type: "input", action: "+attack" }); };
+      fireBtn.onpointerup = fireBtn.onpointercancel = () => {
+        if (firing) { firing = false; send({ type: "input", action: "-attack" }); }
+      };
+
+      // Pointer pad: held arrows stream relative cursor deltas on the same
+      // 15 ms cadence the drag pad used, tuned for a 1920Ã—1080 screen (full
+      // width in ~4 s, full height in ~4 s). The sub-unit remainder carries
+      // into the next tick so timer jitter cannot lose motion. Click sends a
+      // put (place target at the cursor).
+      const cpad = document.getElementById("cpad");
+      const heldDirs = new Set();
+      let pAccX = 0, pAccY = 0, pLast = performance.now();
+      const CURSOR_MS_X = 480 / 1000, CURSOR_MS_Y = 270 / 1000;
+      setInterval(() => {
+        const now = performance.now();
+        const dt = Math.min(now - pLast, 100);
+        pLast = now;
+        if (!heldDirs.size) return;
+        let dx = 0, dy = 0;
+        if (heldDirs.has("left")) dx--;
+        if (heldDirs.has("right")) dx++;
+        if (heldDirs.has("up")) dy--;
+        if (heldDirs.has("down")) dy++;
+        if (!dx && !dy) return;
+        pAccX += dx * CURSOR_MS_X * dt;
+        pAccY += dy * CURSOR_MS_Y * dt;
+        const sx = Math.trunc(pAccX), sy = Math.trunc(pAccY);
+        if (sx || sy) send({ type: "cursor", x: sx, y: sy });
+        pAccX -= sx; pAccY -= sy;
+      }, 15);
+      for (const b of cpad.querySelectorAll("button[data-cur]")) {
+        const dir = b.dataset.cur;
+        b.addEventListener("pointerdown", (e) => {
+          heldDirs.add(dir);
+          try { b.setPointerCapture(e.pointerId); } catch {}
+        });
+        const release = () => heldDirs.delete(dir);
+        b.addEventListener("pointerup", release);
+        b.addEventListener("pointercancel", release);
+      }
+      document.getElementById("cclick").addEventListener("pointerdown", () => {
+        send({ type: "put", x: 0, y: 0 });
+      });
+
+      // team pickers (flag / grave / voice)
+      let teamData = null, flagIdx = 0, graveIdx = 0, voiceIdx = 0;
+      const voiceSample = document.createElement("audio");
+      voiceSample.preload = "auto";
+      voiceSample.style.display = "none";
+      document.body.appendChild(voiceSample);
+      let voicePendingPlay = false;
+
+      function renderPickers() {
+        if (!teamData) return;
+        const { flags, graves, voices, flagCell, flagCols, graveCell, graveCols } = teamData;
+        const f = flags[flagIdx], g = graves[graveIdx], v = voices[voiceIdx];
+        const fi = document.getElementById("flagIcon");
+        fi.style.backgroundImage = 'url("/assets/team/flags.png")';
+        fi.style.backgroundSize = `${flagCols * flagCell[0] * 2}px ${Math.ceil(flags.length / flagCols) * flagCell[1] * 2}px`;
+        fi.style.backgroundPosition = `${-f.x * 2}px ${-f.y * 2}px`;
+        document.getElementById("flagName").textContent = f.name;
+        const gi = document.getElementById("graveIcon");
+        gi.style.backgroundImage = 'url("/assets/team/graves.png")';
+        gi.style.backgroundSize = `${graveCols * graveCell[0]}px ${Math.ceil(graves.length / graveCols) * graveCell[1]}px`;
+        gi.style.backgroundPosition = `${-g.x}px ${-g.y}px`;
+        document.getElementById("graveName").textContent = g.name;
+        document.getElementById("voiceName").textContent = v.name;
+      }
+
+      function playVoiceSample() {
+        if (!teamData) return;
+        voiceSample.src = teamData.voices[voiceIdx].sample;
+        voiceSample.currentTime = 0;
+        voiceSample.play()
+          .then(() => { voicePendingPlay = false; })
+          .catch(() => { voicePendingPlay = true; });
+      }
+
+      function initPickers() {
+        fetch("/assets/team/team.json")
+          .then((r) => r.json())
+          .then((d) => {
+            teamData = d;
+            flagIdx = Math.max(0, d.flags.findIndex((f) => f.name === "hedgewars"));
+            graveIdx = Math.max(0, d.graves.findIndex((g) => g.name === "Statue"));
+            voiceIdx = Math.max(0, d.voices.findIndex((v) => v.name === "Default"));
+            renderPickers();
+            if (!teamformEl.hidden) playVoiceSample();
+          })
+          .catch(() => {});
+      }
+      initPickers();
+      document.getElementById("flagPick").onclick = () => {
+        flagIdx = (flagIdx + 1) % teamData.flags.length; renderPickers();
+      };
+      document.getElementById("gravePick").onclick = () => {
+        graveIdx = (graveIdx + 1) % teamData.graves.length; renderPickers();
+      };
+      document.getElementById("voicePick").onclick = () => {
+        voiceIdx = (voiceIdx + 1) % teamData.voices.length; renderPickers(); playVoiceSample();
+      };
+      document.addEventListener("pointerdown", () => {
+        if (voicePendingPlay) playVoiceSample();
+      }, { capture: true });
+
+      const nameByAmmo = new Map(HW_WEAPONS.map((x) => [x.w, x.name]));
+      const wpanel = document.getElementById("weaponspanel");
+      const wgridwrap = document.getElementById("wgridwrap");
+
+      weaponsBtn.onclick = () => { renderWeapons(); wpanel.classList.add("open"); };
+      document.getElementById("wclose").onclick = () => wpanel.classList.remove("open");
+
+      function makeCell(w) {
+        const cell = document.createElement("button");
+        const name = nameByAmmo.get(w) || "?";
+        cell.className = "wcell" + (name === "Switch Hedgehog" ? " switcher" : "");
+        const availChar = ammoStore[w - 1] || "0";
+        if (availChar === "0") cell.classList.add("dim");
+        const icon = document.createElement("div");
+        icon.className = "wicon";
+        const frame = w - 1;
+        const col = Math.floor(frame / 16), row = frame % 16;
+        icon.style.backgroundPosition = `${-col * 32}px ${-row * 32}px`;
+        cell.appendChild(icon);
+        const label = document.createElement("span");
+        label.className = "wname";
+        label.textContent = name;
+        cell.appendChild(label);
+        cell.onclick = () => {
+          send({ type: "input", action: "setweap " + String.fromCharCode(w) });
+        };
+        return cell;
+      }
+
+      function makeNoWeaponCell() {
+        const cell = document.createElement("button");
+        cell.className = "wcell noweap";
+        const icon = document.createElement("span");
+        icon.className = "wnoweap";
+        icon.textContent = "Ã—";
+        cell.appendChild(icon);
+        const label = document.createElement("span");
+        label.className = "wname";
+        label.textContent = "No Weapon";
+        cell.appendChild(label);
+        // '~' is the engine's synonym for the NUL ammo (amNothing): it
+        // deselects whatever weapon the hog is holding
+        cell.onclick = () => send({ type: "input", action: "setweap ~" });
+        return cell;
+      }
+
+      function makeGrid(cells) {
+        const grid = document.createElement("div");
+        grid.className = "wgrid";
+        grid.appendChild(makeNoWeaponCell());
+        for (const ammoIdx of cells) grid.appendChild(makeCell(ammoIdx));
+        return grid;
+      }
+
+      function renderWeapons() {
+        wgridwrap.replaceChildren();
+        const landscape = window.innerWidth > window.innerHeight;
+        if (landscape) {
+          const wrap = document.createElement("div");
+          wrap.className = "whalfwrap";
+          wrap.appendChild(makeGrid(HW_AMMOMENU.slice(0, Math.ceil(HW_AMMOMENU.length / 2))));
+          wrap.appendChild(makeGrid(HW_AMMOMENU.slice(Math.ceil(HW_AMMOMENU.length / 2))));
+          wgridwrap.appendChild(wrap);
+        } else {
+          wgridwrap.appendChild(makeGrid(HW_AMMOMENU));
+        }
+      }
+      window.addEventListener("resize", () => { if (wpanel.classList.contains("open")) renderWeapons(); });
+
+      document.getElementById("teamBtn").onclick = () => {
+        const config = buildTeamConfig();
+        if (!config) return;
+        savedTeamConfig = config;
+        if (queued) {
+          // pre-building while queued: the queue stores it; admission
+          // registers it automatically
+          sendQueueTeam(config);
+          return;
+        }
+        send({ type: "team", config });
+        myTeam = config.name;
+        teamformEl.hidden = true;
+        teamSaved = true;
+        activeEl.textContent = "team registered — waiting for game";
+      };
+
+      if (streamFlow) refreshMode();
+      document.getElementById("joinBtn").onclick = async () => {
+        code = codeEl.value.toUpperCase().trim();
+        const res = await fetch(`/api/rooms/${code}/join`, { method: "POST" });
+        if (!res.ok) { alert(res.status === 404 ? "no such room" : "join failed"); return; }
+        document.getElementById("join").hidden = true;
+        document.getElementById("game").hidden = false;
+        connect();
+        if (teamData && !teamformEl.hidden) playVoiceSample();
+      };
+    </script>
+  </body>
+</html>
