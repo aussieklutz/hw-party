@@ -787,6 +787,101 @@ with CurrentTeam^ do
     end
 end;
 
+// traitor <hogIdx> <teamName>: local-only (stream host) command. Hog <hogIdx>
+// of <teamName> is the traitor. When it is the last living hog of its team,
+// clone it onto another living team and remove the original: the old team is
+// eliminated, CheckForWin ends the game, and the traitor stands among the
+// survivors. No-op in every other situation, so a host may fire it at every
+// turn start without tracking team health itself.
+procedure chTraitor(var s: shortstring);
+var rest: shortstring;
+    idx, t, i: LongInt;
+    src, dst: PTeam;
+    hh, nh, buddy, oldHog: PHedgehog;
+    orig, gear: PGear;
+begin
+if isExternalSource then exit;
+rest:= '';
+SplitBySpace(s, rest);
+idx:= StrToInt(s);
+if (idx < 0) or (idx > cMaxHHIndex) then exit;
+
+src:= nil;
+for t:= 0 to Pred(TeamsCount) do
+    if TeamsArray[t]^.TeamName = rest then
+        src:= TeamsArray[t];
+if src = nil then exit;
+
+hh:= @src^.Hedgehogs[idx];
+orig:= hh^.Gear;
+if (orig = nil) or (hh = CurrentHedgehog) or (TeamSize(src) <> 1)
+or (orig^.Health <= 0) or (orig^.Damage > 0) or ((orig^.State and (gstDrowning or gstHHGone)) <> 0) then
+    exit;
+
+// destination: the first other clan that is still alive and has a free slot
+dst:= nil;
+for t:= 0 to Pred(TeamsCount) do
+    if (dst = nil) and (TeamsArray[t]^.Clan <> src^.Clan) and (TeamSize(TeamsArray[t]) > 0)
+    and (TeamsArray[t]^.HedgehogsNumber <= cMaxHHIndex) then
+        dst:= TeamsArray[t];
+if dst = nil then exit;
+
+buddy:= nil;
+for i:= 0 to cMaxHHIndex do
+    if (buddy = nil) and (dst^.Hedgehogs[i].Gear <> nil) then
+        buddy:= @dst^.Hedgehogs[i];
+if buddy = nil then exit;
+
+nh:= @dst^.Hedgehogs[dst^.HedgehogsNumber];
+nh^.Name:= hh^.Name;
+nh^.Team:= dst;
+nh^.BotLevel:= hh^.BotLevel;
+nh^.Hat:= hh^.Hat;
+nh^.InitialHealth:= hh^.InitialHealth;
+nh^.RevengeHog:= nil;
+nh^.FlownOffMap:= false;
+nh^.AmmoStore:= buddy^.AmmoStore;
+nh^.Ammo:= buddy^.Ammo;
+nh^.CurAmmoType:= buddy^.CurAmmoType;
+
+// AddGear binds the new gear to CurrentHedgehog, so point it at the clone
+// for the call (a plain assignment: neither gear has a collision entry yet)
+oldHog:= CurrentHedgehog;
+CurrentHedgehog:= nh;
+gear:= AddGear(hwRound(orig^.X), hwRound(orig^.Y), gtHedgehog, gstMoving, _0, _0, 0);
+CurrentHedgehog:= oldHog;
+gear^.Health:= orig^.Health;
+gear^.dX:= orig^.dX;
+gear^.Active:= true;
+nh^.Gear:= gear;
+AddCI(gear);
+inc(dst^.HedgehogsNumber);
+
+// the renderer dereferences a hog's name/health tags unchecked, and the
+// store only builds them for hogs that exist at game start: build them for
+// the clone the same way (name in its new team's colour)
+nh^.NameTagTex:= RenderStringTex(ansistring(nh^.Name), dst^.Clan^.Color, fnt16);
+LoadHedgehogHat(nh^, nh^.Hat);
+RenderHealth(nh^);
+
+// the original leaves the way a gone team's hogs do: no grave, no corpse
+orig^.Hedgehog^.Effects[heInvulnerable]:= 0;
+orig^.Damage:= orig^.Health;
+orig^.State:= (orig^.State or gstHHGone) and (not gstHHDriven);
+
+// teleport-ish puff at the swap point
+for i:= 1 to 8 do
+    AddVisualGear(hwRound(orig^.X), hwRound(orig^.Y), vgtSmokeWhite);
+
+RecountTeamHealth(dst);
+RecountTeamHealth(src);
+
+// tell the party host the swap happened ('z' + the team the traitor left),
+// like the x/y turn notices: the host records the defection for the results
+if isPartyMode then
+    SendIPC('z' + src^.TeamName)
+end;
+
 procedure loadTeamBinds(s: shortstring);
 var i: LongInt;
 begin
@@ -1019,6 +1114,23 @@ begin
 end;
 
 
+procedure chTeamHuman(var s: shortstring);
+var t, i: LongInt;
+begin
+// party mode: hand an AI-controlled team to a human player mid-game.
+// The team keeps its identity; control simply stops being automatic.
+t:= 0;
+while (t < TeamsCount) and (TeamsArray[t]^.TeamName <> s) do
+    inc(t);
+if t = TeamsCount then
+    exit;
+
+with TeamsArray[t]^ do
+    for i:= 0 to HedgehogsNumber - 1 do
+        Hedgehogs[i].BotLevel:= 0
+end;
+
+
 procedure SwitchCurrentHedgehog(newHog: PHedgehog);
 var oldCI, newCI: boolean;
     oldHH: PHedgehog;
@@ -1102,6 +1214,8 @@ RegisterVariable('hhcoords', @chSetHHCoords, false);
 RegisterVariable('bind', @chBind, true );
 RegisterVariable('teamgone', @chTeamGone, true );
 RegisterVariable('teamback', @chTeamBack, true );
+RegisterVariable('teamhuman', @chTeamHuman, true );
+RegisterVariable('traitor', @chTraitor, true );
 RegisterVariable('fort'    , @chFort         , false);
 RegisterVariable('grave'   , @chGrave        , false);
 RegisterVariable('hat'     , @chSetHat       , false);
