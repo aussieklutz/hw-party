@@ -1,0 +1,20 @@
+{
+  "name": "hw-party",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "check": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261010.1",
+    "@types/qrcode": "^1.5.6",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.0.0",
+    "ws": "^8.18.0"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  }
+}

@@ -39,7 +39,7 @@ procedure NetGetNextCmd;
 procedure doPut(putX, putY: LongInt; fromAI: boolean);
 
 implementation
-uses uConsole, uConsts, uVariables, uCommands, uUtils, uDebug, uLocale, uSound;
+uses uConsole, uConsts, uVariables, uCommands, uUtils, uDebug, uLocale, uSound, uCursor;
 
 const
     cSendEmptyPacketTime = 1000;
@@ -401,7 +401,12 @@ while (headcmd <> nil)
         or (headcmd^.cmd = '#') // must be synced for saves to work
         or (headcmd^.cmd = 'b')
         or (headcmd^.cmd = 'F')
-        or (headcmd^.cmd = 'G')) do
+        or (headcmd^.cmd = 'G')
+        // party mode: the frontend fabricates 'P' cursor deltas and 'p' puts
+        // without a trailing tick stamp, and cursor deltas must land when they
+        // arrive anyway (local mouse deltas are applied straight from the SDL
+        // event pump, not on tick boundaries) - execute both immediately
+        or (isPartyMode and ((headcmd^.cmd = 'P') or (headcmd^.cmd = 'p')))) do
     begin
     case headcmd^.cmd of
         '+': ; // do nothing - it is just an empty packet
@@ -449,13 +454,25 @@ while (headcmd <> nil)
             // these are equations solved for CursorPoint
             // SDLNet_Read16(@(headcmd^.X)) == CursorPoint.X - WorldDx;
             // SDLNet_Read16(@(headcmd^.Y)) == cScreenHeight - CursorPoint.Y - WorldDy;
-            if CurrentTeam^.ExtDriven then
+            if isPartyMode then
                begin
-               TargetCursorPoint.X:= LongInt(SDLNet_Read32(@(headcmd^.str[2]))) + WorldDx;
-               TargetCursorPoint.Y:= cScreenHeight - LongInt(SDLNet_Read32(@(headcmd^.str[6]))) - WorldDy;
-               if not bShowAmmoMenu and autoCameraOn then
-                    CursorPoint:= TargetCursorPoint
+               // party mode: the phone streams relative cursor deltas in
+               // cursor units (screen convention: dy positive = down);
+               // applied exactly like local mouse deltas so the camera
+               // edge logic and zoom handling behave identically. The tap
+               // arrives separately as a 'p' put.
+               uCursor.handlePositionUpdate(
+                   LongInt(SDLNet_Read32(@(headcmd^.str[2]))),
+                   LongInt(SDLNet_Read32(@(headcmd^.str[6]))))
                end
+            else
+                if CurrentTeam^.ExtDriven then
+                   begin
+                   TargetCursorPoint.X:= LongInt(SDLNet_Read32(@(headcmd^.str[2]))) + WorldDx;
+                   TargetCursorPoint.Y:= cScreenHeight - LongInt(SDLNet_Read32(@(headcmd^.str[6]))) - WorldDy;
+                   if not bShowAmmoMenu and autoCameraOn then
+                        CursorPoint:= TargetCursorPoint
+                   end
              end;
         'w': ParseCommand('setweap ' + headcmd^.str[2], true);
         't': ParseCommand('taunt ' + headcmd^.str[2], true);
@@ -548,7 +565,7 @@ with CurrentHedgehog^.Gear^,
         else
             PlaySound(sndDenied)
     else
-        if CurrentTeam^.ExtDriven then
+        if CurrentTeam^.ExtDriven and (not isPartyMode) then
             OutError('Got /put while not being in choose target mode', false)
 end;
 

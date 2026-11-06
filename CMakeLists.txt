@@ -15,6 +15,7 @@ include(${CMAKE_MODULE_PATH}/utils.cmake)
 #possible cmake configuration
 option(BUILD_OFFLINE "Disable automatic downloading of dependecies by cabal and cargo" OFF)
 option(NOSERVER "Disable gameServer build (off)" OFF)
+option(NOFRONTEND "Disable frontend build, e.g. for a headless engine-only build (off)" OFF)
 if(NOT WIN32)
     option(NOPNG "Disable screenshoot compression (off)" OFF)
 endif()
@@ -260,7 +261,7 @@ if(ANDROID)
     add_subdirectory(project_files/Android-build)
 else(ANDROID)
     #skip frontend for javascript
-    if(NOT BUILD_ENGINE_JS)
+    if(NOT BUILD_ENGINE_JS AND NOT NOFRONTEND)
         add_subdirectory(frontend-qt6)
         add_subdirectory(share)
     endif()
@@ -275,6 +276,11 @@ enable_testing()
 
 add_custom_target(test_normal  COMMAND ${CMAKE_CTEST_COMMAND} -E '^todo/' --timeout 300 --schedule-random)
 add_custom_target(test_verbose COMMAND ${CMAKE_CTEST_COMMAND} -E '^todo/' --timeout 300 --schedule-random -V)
+
+# the party host rules can be tested without the engine, see frontend-qt6/tests
+if(NOT ANDROID AND NOT BUILD_ENGINE_JS AND NOT NOFRONTEND)
+    add_subdirectory(frontend-qt6/tests)
+endif()
 
 set(LUATESTS_DIR "${CMAKE_SOURCE_DIR}/tests/lua")
 set(TESTSDATA_DIR "${CMAKE_SOURCE_DIR}/share/hedgewars/Data")

@@ -1,0 +1,31 @@
+name = "hwstream-signup"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hwstream-signup"
+# placeholder id: create the database with `wrangler d1 create hwstream-signup`
+# and put the id it prints here. Local dev runs on the emulated sqlite and never
+# touches it.
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[vars]
+# DEV_MODE returns the magic link in the API response instead of emailing it;
+# `.dev.vars` turns it on for local development. Production sends real email
+# through the send_email binding below.
+DEV_MODE = "0"
+# sender of the magic-link emails; must be an address on a domain with Email
+# Routing set up in your Cloudflare account
+# MAIL_FROM = "hw-signup@example.com"
+# the identity provider sends signed-in players back to the stream site here
+# (never a URL from the request)
+# STREAM_URL = "https://stream.example.com"
+
+# Magic-link delivery: the send_email binding. Without destination_address any
+# email address verified in the Cloudflare dashboard (Account Home -> Email ->
+# Email Routing) can receive a link; the paid Workers plan lifts that
+# restriction so arbitrary players can receive theirs. Pin a single address
+# with `destination_address = "you@example.com"` to restrict it.
+[[send_email]]
+name = "SEND_EMAIL"

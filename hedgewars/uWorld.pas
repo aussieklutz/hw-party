@@ -40,6 +40,7 @@ procedure InitTouchInterface;
 procedure SetUtilityWidgetState(ammoType: TAmmoType);
 procedure animateWidget(widget: POnScreenWidget; fade, showWidget: boolean);
 procedure MoveCamera;
+procedure PartyRecentreCursor;
 procedure onFocusStateChanged;
 procedure updateCursorVisibility;
 procedure updateTouchWidgets(ammoType: TAmmoType);
@@ -1940,6 +1941,18 @@ end;
 
 var PrevSentPointTime: LongWord = 0;
 
+procedure PartyRecentreCursor;
+begin
+    // party mode: centre the virtual cursor on the camera and sync the
+    // motion-detector baseline in the same step. MoveCamera drops FollowGear
+    // whenever the cursor moved since prevPoint, so a recentre without the
+    // sync would read as movement and the camera would never pan over to the
+    // next hedgehog at the start of a turn.
+    CursorPoint.X:= 0;
+    CursorPoint.Y:= cScreenHeight div 2;
+    prevPoint:= CursorPoint
+end;
+
 procedure MoveCamera;
 var EdgesDist, shs,z, dstX: LongInt;
     inbtwnTrgtAttks: Boolean;
@@ -2052,7 +2065,7 @@ if (CurrentTeam^.ExtDriven and isCursorVisible and autoCameraOn) or
             end;
     end
 else
-    if cHasFocus then
+    if cHasFocus or isPartyMode then
         begin
         WorldDx:= WorldDx - CursorPoint.X + prevPoint.X;
         WorldDy:= WorldDy + CursorPoint.Y - prevPoint.Y;

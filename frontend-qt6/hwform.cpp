@@ -28,9 +28,11 @@
 #include <QIcon>
 #include <QImage>
 #include <QInputDialog>
+#include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QListWidgetItem>
 #include <QMessageBox>
 #include <QPropertyAnimation>
 #include <QPushButton>
@@ -46,6 +48,7 @@
 #include <QTextBrowser>
 #include <QTextStream>
 #include <QTimer>
+#include <QtEndian>
 
 #if (QT_VERSION >= 0x040600)
 #include <QGraphicsEffect>
@@ -85,6 +88,7 @@
 #include "pagenetgame.h"
 #include "pagenetserver.h"
 #include "pageoptions.h"
+#include "pageparty.h"
 #include "pageplayrecord.h"
 #include "pageroomslist.h"
 #include "pagescheme.h"
@@ -92,7 +96,9 @@
 #include "pagesingleplayer.h"
 #include "pagetraining.h"
 #include "pagevideos.h"
+#include "partyclient.h"
 #include "playerslistmodel.h"
+#include "proto.h"
 #include "recorder.h"
 #include "selectWeapon.h"
 #include "team.h"
@@ -141,6 +147,11 @@ HWForm::HWForm(QWidget *parent, const QString &styleSheet)
       QStringLiteral("/Music/main_theme.ogg"));
 
   this->setStyleSheet(styleSheet);
+
+  m_partyMode = QStringLiteral("classic");
+  m_partySlots = 4;
+  m_partyCpuTier = 5;
+  m_partyCpuCounter = 0;
 
   QIcon *hwIcon = new QIcon();
   hwIcon->addFile(QStringLiteral(":/res/hh_small.png"));
@@ -332,6 +343,21 @@ HWForm::HWForm(QWidget *parent, const QString &styleSheet)
   connect(ui.pageNetServer->BtnStart, &QAbstractButton::clicked, this,
           &HWForm::NetStartServer);
 
+  connect(ui.pageMain->BtnParty, &QAbstractButton::clicked, this,
+          [this] { GoToPage(ID_PAGE_PARTY); });
+  connect(ui.pageParty->BtnCreate, &QAbstractButton::clicked, this,
+          &HWForm::PartyCreate);
+  connect(ui.pageParty->BtnStart, &QAbstractButton::clicked, this,
+          &HWForm::PartyStart);
+  connect(ui.pageParty->gameCFG, &GameCFGWidget::goToSchemes, this,
+          &HWForm::GoToScheme);
+  connect(ui.pageParty->gameCFG, &GameCFGWidget::goToWeapons, this,
+          &HWForm::GoToWeapons);
+  connect(ui.pageParty->sbSlots, QOverload<int>::of(&QSpinBox::valueChanged),
+          this, [this] {
+            if (m_partyMode == QStringLiteral("fixed")) updatePartySlots();
+          });
+
   connect(ui.pageNetGame->pNetTeamsWidget, &TeamSelWidget::setEnabledGameStart,
           ui.pageNetGame->BtnStart, &QWidget::setEnabled);
   connect(ui.pageNetGame, &PageNetGame::SetupClicked, this,
@@ -421,6 +447,7 @@ HWForm::HWForm(QWidget *parent, const QString &styleSheet)
       this, cfgdir.absolutePath() + QStringLiteral("/Schemes/Game"));
   ui.pageScheme->setModel(gameSchemeModel);
   ui.pageMultiplayer->gameCFG->GameSchemes->setModel(gameSchemeModel);
+  ui.pageParty->gameCFG->GameSchemes->setModel(gameSchemeModel);
   ui.pageOptions->SchemesName->setModel(gameSchemeModel);
 
   wBackground = new BGWidget(this);
@@ -505,6 +532,7 @@ void HWForm::UpdateWeapons() {
   combos.push_back(ui.pageOptions->WeaponsName);
   combos.push_back(ui.pageMultiplayer->gameCFG->WeaponsName);
   combos.push_back(ui.pageNetGame->pGameCFG->WeaponsName);
+  combos.push_back(ui.pageParty->gameCFG->WeaponsName);
   combos.push_back(ui.pageSelectWeapon->selectWeaponSet);
 
   QStringList names = ui.pageSelectWeapon->pWeapons->getWeaponNames();
@@ -529,6 +557,7 @@ void HWForm::AddWeapons(const QString &weaponsName, const QString &ammo) {
   combos.push_back(ui.pageOptions->WeaponsName);
   combos.push_back(ui.pageMultiplayer->gameCFG->WeaponsName);
   combos.push_back(ui.pageNetGame->pGameCFG->WeaponsName);
+  combos.push_back(ui.pageParty->gameCFG->WeaponsName);
   combos.push_back(ui.pageSelectWeapon->selectWeaponSet);
 
   for (QVector<QComboBox *>::iterator it = combos.begin(); it != combos.end();
@@ -544,6 +573,7 @@ void HWForm::DeleteWeapons(const QString &weaponsName) {
   combos.push_back(ui.pageOptions->WeaponsName);
   combos.push_back(ui.pageMultiplayer->gameCFG->WeaponsName);
   combos.push_back(ui.pageNetGame->pGameCFG->WeaponsName);
+  combos.push_back(ui.pageParty->gameCFG->WeaponsName);
   combos.push_back(ui.pageSelectWeapon->selectWeaponSet);
 
   for (QVector<QComboBox *>::iterator it = combos.begin(); it != combos.end();
@@ -562,6 +592,7 @@ void HWForm::EditWeapons(const QString &oldWeaponsName,
   combos.push_back(ui.pageOptions->WeaponsName);
   combos.push_back(ui.pageMultiplayer->gameCFG->WeaponsName);
   combos.push_back(ui.pageNetGame->pGameCFG->WeaponsName);
+  combos.push_back(ui.pageParty->gameCFG->WeaponsName);
   combos.push_back(ui.pageSelectWeapon->selectWeaponSet);
 
   QStringList names = ui.pageSelectWeapon->pWeapons->getWeaponNames();
@@ -755,6 +786,9 @@ QString HWForm::stringifyPageId(quint32 id) {
       break;
     case ID_PAGE_NETSERVER:
       pageName = QStringLiteral("PAGE_NETSERVER");
+      break;
+    case ID_PAGE_PARTY:
+      pageName = QStringLiteral("PAGE_PARTY");
       break;
     case ID_PAGE_INGAME:
       pageName = QStringLiteral("PAGE_INGAME");
@@ -1739,6 +1773,616 @@ void HWForm::NetConnect() {
   delete hpd;
 }
 
+void HWForm::PartyCreate() {
+  QUrl url = QUrl::fromUserInput(ui.pageParty->leServerUrl->text().trimmed());
+  if (!url.isValid() || url.host().isEmpty()) {
+    MessageDialog::ShowErrorMessage(PartyClient::tr("Invalid party server URL"),
+                                    this);
+    return;
+  }
+  if (!partyClient) {
+    partyClient = new PartyClient(this);
+    connect(partyClient.data(), &PartyClient::roomCreated, this,
+            &HWForm::PartyRoomCreated);
+    connect(partyClient.data(), &PartyClient::teamRegistered, this,
+            &HWForm::PartyTeamRegistered);
+    connect(partyClient.data(), &PartyClient::memberLeft, this,
+            &HWForm::PartyMemberLeft);
+    connect(partyClient.data(), &PartyClient::memberJoined, this,
+            &HWForm::PartyMemberJoined);
+    connect(partyClient.data(), &PartyClient::partyError, this,
+            &HWForm::PartyError);
+    connect(partyClient.data(), &PartyClient::inputReceived, this,
+            &HWForm::PartyInput);
+    connect(partyClient.data(), &PartyClient::cursorReceived, this,
+            &HWForm::PartyCursor);
+    connect(partyClient.data(), &PartyClient::putReceived, this,
+            &HWForm::PartyPut);
+    connect(partyClient.data(), &PartyClient::aliveChecked, this,
+            &HWForm::PartyAliveChecked);
+  }
+  int modeIndex = ui.pageParty->cbMode->currentIndex();
+  m_partyMode = modeIndex == PageParty::Fixed      ? QStringLiteral("fixed")
+                : modeIndex == PageParty::Dynamic  ? QStringLiteral("dynamic")
+                : modeIndex == PageParty::Teams    ? QStringLiteral("teams")
+                : modeIndex == PageParty::Imposter ? QStringLiteral("imposter")
+                                                   : QStringLiteral("classic");
+  m_partySlots = ui.pageParty->sbSlots->value();
+  m_partyCpuTier = ui.pageParty->cbCpuTier->currentIndex() + 1;
+  if (isPartySeatMode())
+    partyClient->createRoom(url, m_partyMode, 0, partyMaxPlayers());
+  else
+    partyClient->createRoom(
+        url, m_partyMode,
+        m_partyMode == QStringLiteral("classic") ? 0 : m_partySlots);
+}
+
+bool HWForm::isPartySeatMode() const {
+  return m_partyMode == QStringLiteral("teams") ||
+         m_partyMode == QStringLiteral("imposter");
+}
+
+// in the team and imposter lobbies the spin box counts players, not slots
+int HWForm::partyMaxPlayers() const { return m_partySlots; }
+
+void HWForm::ensurePartyCore() {
+  if (m_partyCore) return;
+  m_partyCore = new PartyHostCore(this);
+  connect(m_partyCore, &PartyHostCore::seatNotice, this,
+          [this](const QString &sid, bool seated, const QString &team) {
+            if (partyClient) partyClient->sendSeat(sid, seated, team);
+          });
+  connect(m_partyCore, &PartyHostCore::notify, this,
+          [this](const QString &sid, const QString &text) {
+            if (partyClient) partyClient->sendNotify(sid, text);
+          });
+  connect(m_partyCore, &PartyHostCore::engineCommand, this,
+          &HWForm::sendPartyCommand);
+  connect(m_partyCore, &PartyHostCore::rosterLines, this,
+          [this](const QStringList &lines) {
+            ui.pageParty->rosterList->clear();
+            ui.pageParty->rosterList->addItems(lines);
+          });
+  connect(
+      m_partyCore, &PartyHostCore::rosterNote, this,
+      [this](const QString &line) { ui.pageParty->rosterList->addItem(line); });
+}
+
+void HWForm::PartyRoomCreated(const QString &code) {
+  ui.pageParty->lblRoomCode->setText(code);
+  ui.pageParty->showJoinLink(partyClient->joinLink());
+  ui.pageParty->rosterList->clear();
+  ui.pageParty->rosterList->addItem(tr("You (host)"));
+  cancelPartyAfk();
+  m_partyTeamToSid.clear();
+  m_partyActiveSid.clear();
+  m_partyPlaceholders.clear();
+  m_partyAdopted.clear();
+  m_partyGone.clear();
+  m_partyCpuCounter = 0;
+  if (isPartySeatMode()) {
+    ensurePartyCore();
+    m_partyCore->reset(m_partyMode, partyMaxPlayers());
+  } else if (m_partyCore) {
+    m_partyCore->reset(QString(), 0);
+  }
+  updatePartySlots();
+  updateDynamicCpu();
+}
+
+HWTeam HWForm::makeCpuPlaceholder(int n) const {
+  HWTeam team;
+  team.setDifficulty(static_cast<unsigned int>(m_partyCpuTier));
+  team.setNumHedgehogs(4);
+  HWNamegen::teamRandomEverything(team);
+  team.setOwner(QStringLiteral("cpu:%1").arg(n));
+  // placeholders must sit on the playing list like the phone teams: net-style
+  // rows, but without the erdriven marker — the engine runs the turn machine
+  // locally, and removeNetTeam/adoption look them up in the playing list
+  team.setNetTeam(true);
+  team.setSkipRDriven(true);
+  const QList<HWTeam> playing = ui.pageParty->teamsSelect->getPlayingTeams();
+  team.setColor(playing.size() %
+                DataManager::instance().colorsModel()->rowCount());
+  return team;
+}
+
+void HWForm::updatePartySlots() {
+  if (m_partyMode != QStringLiteral("fixed")) return;
+  if (game && game->gameState == gsStarted) return;
+  QList<HWTeam> humans;
+  QList<HWTeam> placeholders;
+  for (const HWTeam &team : ui.pageParty->teamsSelect->getPlayingTeams()) {
+    if (m_partyPlaceholders.contains(team) &&
+        !m_partyAdopted.contains(team.name()))
+      placeholders.push_back(team);
+    else
+      humans.push_back(team);
+  }
+  while (humans.size() + placeholders.size() > m_partySlots &&
+         !m_partyPlaceholders.isEmpty()) {
+    const HWTeam last = m_partyPlaceholders.takeLast();
+    if (m_partyAdopted.contains(last.name())) break;
+    ui.pageParty->teamsSelect->removeNetTeam(last);
+    for (int i = placeholders.size() - 1; i >= 0; i--)
+      if (placeholders.at(i).name() == last.name()) placeholders.removeAt(i);
+  }
+  while (humans.size() + placeholders.size() < m_partySlots) {
+    const HWTeam team = makeCpuPlaceholder(++m_partyCpuCounter);
+    m_partyPlaceholders.push_back(team);
+    ui.pageParty->teamsSelect->addTeam(team);
+    placeholders.push_back(team);
+  }
+}
+
+void HWForm::updateDynamicCpu() {
+  if (m_partyMode != QStringLiteral("dynamic")) return;
+  if (game && game->gameState == gsStarted) return;
+  QList<HWTeam> dynCpu;
+  int humans = 0;
+  for (const HWTeam &team : ui.pageParty->teamsSelect->getPlayingTeams()) {
+    if (m_partyPlaceholders.contains(team))
+      dynCpu.push_back(team);
+    else
+      humans++;
+  }
+  if (humans == 1 && dynCpu.isEmpty()) {
+    const HWTeam team = makeCpuPlaceholder(++m_partyCpuCounter);
+    m_partyPlaceholders.push_back(team);
+    ui.pageParty->teamsSelect->addTeam(team);
+  } else if (humans != 1) {
+    for (const HWTeam &team : dynCpu) {
+      m_partyPlaceholders.removeOne(team);
+      ui.pageParty->teamsSelect->removeNetTeam(team);
+    }
+  }
+}
+
+void HWForm::PartyTeamRegistered(const QString &sid, const QJsonObject &config,
+                                 int seat) {
+  if (isPartySeatMode()) {
+    // the host core seats the player (and tells their phone where they sit)
+    Q_UNUSED(seat);
+    ensurePartyCore();
+    m_partyCore->registered(sid,
+                            config.value(QStringLiteral("name")).toString());
+    return;
+  }
+  const QList<HWTeam> playingTeams =
+      ui.pageParty->teamsSelect->getPlayingTeams();
+  for (const HWTeam &team : playingTeams) {
+    if (team.owner() == sid) return;
+  }
+
+  HWTeam team;
+  const HWTeam defaults;
+  team.setNetTeam(true);
+  // the party game is local: the engine must run the turn machine itself,
+  // so this net-style team must not carry the erdriven marker
+  team.setSkipRDriven(true);
+  team.setName(config.value(QStringLiteral("name")).toString().left(40));
+  team.setFlag(config.value(QStringLiteral("flag")).toString());
+  team.setGrave(config.value(QStringLiteral("grave")).toString());
+  team.setVoicepack(config.value(QStringLiteral("voice")).toString());
+  const QJsonArray hogs = config.value(QStringLiteral("hogs")).toArray();
+  const int hhCount = qBound(1, hogs.size(), HEDGEHOGS_PER_TEAM);
+  for (int i = 0; i < HEDGEHOGS_PER_TEAM; i++) {
+    HWHog hog;
+    hog.Name = defaults.hedgehog(i).Name;
+    hog.Hat = defaults.hedgehog(i).Hat;
+    if (i < hogs.size()) {
+      const QString hogName =
+          hogs.at(i).toObject().value(QStringLiteral("name")).toString();
+      const QString hogHat =
+          hogs.at(i).toObject().value(QStringLiteral("hat")).toString();
+      if (!hogName.isEmpty()) hog.Name = hogName.left(50);
+      if (!hogHat.isEmpty()) hog.Hat = hogHat;
+    }
+    team.setHedgehog(i, hog);
+  }
+  team.setNumHedgehogs(hhCount);
+  team.setOwner(sid);
+  team.setColor(playingTeams.size() %
+                DataManager::instance().colorsModel()->rowCount());
+  m_partyTeamToSid.insert(team.name(), sid);
+  ui.pageParty->teamsSelect->addTeam(team);
+
+  QListWidgetItem *item = new QListWidgetItem(
+      tr("Player %1 registered team \"%2\"").arg(sid.left(8), team.name()),
+      ui.pageParty->rosterList);
+  item->setData(Qt::UserRole, sid);
+  updatePartySlots();
+  updateDynamicCpu();
+}
+
+void HWForm::PartyMemberJoined(const QString &sid) {
+  // team and imposter lobbies: the player appears in the roster once they
+  // register (a reconnect keeps its sid, so the core's bindings simply hold)
+  if (isPartySeatMode()) return;
+  if (m_partyTeamToSid.values().contains(sid)) {
+    const QString teamName = m_partyTeamToSid.key(sid);
+    if (game && game->gameState == gsStarted) {
+      sendPartyCommand(QStringLiteral("teamback s%1").arg(teamName));
+      m_partyGone.removeAll(teamName);
+      QListWidgetItem *item =
+          new QListWidgetItem(tr("Player %1 reconnected (team \"%2\" back)")
+                                  .arg(sid.left(8), teamName),
+                              ui.pageParty->rosterList);
+      item->setData(Qt::UserRole, sid);
+    }
+    return;
+  }
+  if (!(game && game->gameState == gsStarted)) return;
+
+  // adoption: a fresh joiner mid-game takes over an unclaimed CPU team
+  QString candidate;
+  for (const HWTeam &team : m_partyPlaceholders) {
+    if (!m_partyAdopted.contains(team.name())) {
+      candidate = team.name();
+      break;
+    }
+  }
+  if (candidate.isEmpty()) {
+    QListWidgetItem *item = new QListWidgetItem(
+        tr("Player %1 joined (no free team to adopt)").arg(sid.left(8)),
+        ui.pageParty->rosterList);
+    item->setData(Qt::UserRole, sid);
+    return;
+  }
+  m_partyTeamToSid.insert(candidate, sid);
+  m_partyAdopted.append(candidate);
+  if (m_partyGone.contains(candidate)) {
+    sendPartyCommand(QStringLiteral("teamback s%1").arg(candidate));
+    m_partyGone.removeAll(candidate);
+  }
+  sendPartyCommand(QStringLiteral("teamhuman s%1").arg(candidate));
+  QListWidgetItem *item = new QListWidgetItem(
+      tr("Player %1 adopted team \"%2\"").arg(sid.left(8), candidate),
+      ui.pageParty->rosterList);
+  item->setData(Qt::UserRole, sid);
+}
+
+void HWForm::PartyMemberLeft(const QString &sid) {
+  if (isPartySeatMode()) {
+    ensurePartyCore();
+    if (m_partyCore->locked() && sid == m_partyActiveSid) {
+      // their hog idles out via auto-skip until a rejoin: let go of the keys
+      releasePartyKeys();
+    }
+    const QString note = m_partyCore->memberLeft(sid);
+    if (!note.isEmpty()) ui.pageParty->rosterList->addItem(note);
+    return;
+  }
+  // adopted placeholder first (its widget owner is "cpu:<n>", not the sid)
+  if (m_partyTeamToSid.values().contains(sid)) {
+    const QString teamName = m_partyTeamToSid.key(sid);
+    if (m_partyAdopted.contains(teamName)) {
+      if (game && game->gameState == gsStarted) {
+        if (sid == m_partyActiveSid) {
+          releasePartyKeys();
+        }
+        sendPartyCommand(QStringLiteral("teamgone s%1").arg(teamName));
+        m_partyGone.append(teamName);
+        QListWidgetItem *item =
+            new QListWidgetItem(tr("Player %1 dropped (team \"%2\" is gone)")
+                                    .arg(sid.left(8), teamName),
+                                ui.pageParty->rosterList);
+        item->setData(Qt::UserRole, sid);
+      }
+      m_partyAdopted.removeAll(teamName);
+      m_partyTeamToSid.remove(teamName);
+      return;
+    }
+  }
+  const QList<HWTeam> playingTeams =
+      ui.pageParty->teamsSelect->getPlayingTeams();
+  for (const HWTeam &team : playingTeams) {
+    if (team.owner() != sid) continue;
+    if (game && game->gameState == gsStarted) {
+      if (sid == m_partyActiveSid) {
+        releasePartyKeys();
+      }
+      sendPartyCommand(QStringLiteral("teamgone s%1").arg(team.name()));
+      QListWidgetItem *item =
+          new QListWidgetItem(tr("Player %1 dropped (team \"%2\" is gone)")
+                                  .arg(sid.left(8), team.name()),
+                              ui.pageParty->rosterList);
+      item->setData(Qt::UserRole, sid);
+    } else {
+      ui.pageParty->teamsSelect->removeNetTeam(team);
+    }
+    return;
+  }
+  updatePartySlots();
+  updateDynamicCpu();
+}
+
+// the active player left: let go of every key their phone may still be holding
+void HWForm::releasePartyKeys() {
+  const QStringList held = {
+      QStringLiteral("-left"),   QStringLiteral("-right"),
+      QStringLiteral("-up"),     QStringLiteral("-down"),
+      QStringLiteral("-attack"), QStringLiteral("-precise")};
+  for (const QString &release : held) sendPartyCommand(release);
+  m_partyActiveSid.clear();
+}
+
+void HWForm::sendPartyCommand(const QString &command) {
+  if (!game) return;
+  QByteArray buf;
+  HWProto::addStringToBuffer(buf, QStringLiteral("e") + command);
+  game->FromNet(buf);
+}
+
+void HWForm::sendPartyRaw(const QString &command) {
+  // raw IPC frame ([len][bytes]) — engine built-ins like the 'I' pause
+  // toggle are not e-prefixed variable commands
+  if (!game) return;
+  QByteArray buf;
+  HWProto::addStringToBuffer(buf, command);
+  game->FromNet(buf);
+}
+
+// ---- AFK turn countdown (mirrors the stream agent's host-side flow) ----
+// The active controller pings the room DO every 2s while it is their turn;
+// the host probes /alive/<sid> shortly after each turn notice and, on
+// silence, pauses the engine ('I' toggle freezes the turn timer), counts
+// down on every controller, then either resumes (player showed up, remaining
+// turn time kept) or skips the turn and resumes.
+static constexpr int PARTY_AFK_SECONDS = 10;
+
+void HWForm::cancelPartyAfk() {
+  if (m_partyAfkTimer) m_partyAfkTimer->stop();
+  m_partyAfkSid.clear();
+  m_partyAfkTeam.clear();
+  m_partyAfkLeft = 0;
+  if (m_partyEnginePaused) {
+    m_partyEnginePaused = false;
+    sendPartyRaw(QStringLiteral("I"));  // never leave the engine paused
+  }
+}
+
+void HWForm::startPartyAfkWatch(const QString &teamName, const QString &sid) {
+  if (!partyClient || sid.isEmpty()) return;
+  cancelPartyAfk();
+  m_partyAfkSid = sid;
+  m_partyAfkTeam = teamName;
+  QTimer::singleShot(3000, this, [this, sid] {
+    if (m_partyAfkSid == sid && partyClient) partyClient->checkAlive(sid);
+  });
+}
+
+void HWForm::PartyAliveChecked(const QString &sid, bool alive) {
+  if (!partyClient || sid.isEmpty() || sid != m_partyAfkSid) return;  // stale
+  if (alive) {
+    if (m_partyEnginePaused) {
+      // showed up: unpause — the player keeps their remaining turn time
+      m_partyEnginePaused = false;
+      sendPartyRaw(QStringLiteral("I"));
+      partyClient->sendAfkClear(m_partyAfkTeam);
+    }
+    if (m_partyAfkTimer) m_partyAfkTimer->stop();
+    m_partyAfkSid.clear();
+    m_partyAfkTeam.clear();
+    return;
+  }
+  if (!m_partyEnginePaused) {
+    // phone asleep: pause the engine and count down on the controllers
+    m_partyEnginePaused = true;
+    sendPartyRaw(QStringLiteral("I"));
+    partyClient->sendAfk(m_partyAfkTeam, PARTY_AFK_SECONDS);
+    m_partyAfkLeft = PARTY_AFK_SECONDS;
+    if (!m_partyAfkTimer) {
+      m_partyAfkTimer = new QTimer(this);
+      m_partyAfkTimer->setInterval(1000);
+      connect(m_partyAfkTimer, &QTimer::timeout, this, &HWForm::PartyAfkTick);
+    }
+    m_partyAfkTimer->start();
+    return;
+  }
+  // still silent while paused: count down and skip at zero
+  if (--m_partyAfkLeft <= 0) {
+    if (m_partyAfkTimer) m_partyAfkTimer->stop();
+    m_partyAfkSid.clear();
+    sendPartyCommand(QStringLiteral("skip"));
+    m_partyEnginePaused = false;
+    sendPartyRaw(QStringLiteral("I"));
+    partyClient->sendAfkClear(m_partyAfkTeam);
+    m_partyAfkTeam.clear();
+    m_partyActiveSid.clear();  // controls stay gated for the dead controller
+  }
+}
+
+void HWForm::PartyAfkTick() {
+  if (m_partyAfkSid.isEmpty() || !partyClient) return;
+  partyClient->checkAlive(m_partyAfkSid);
+}
+
+void HWForm::PartyError(const QString &message) {
+  MessageDialog::ShowErrorMessage(message, this);
+}
+
+void HWForm::PartyGameEnded() {
+  // A party round is over: put the room back into the lobby phase. Phones
+  // flip from the controller back to the registration form, and the finished
+  // game's players are purged from the host UI so the next round starts
+  // clean. Session cookies persist, so re-registering is one tap.
+  cancelPartyAfk();
+  if (!partyClient || partyClient->roomCode().isEmpty()) return;
+  partyClient->sendState(QStringLiteral("lobby"));
+
+  const QList<HWTeam> playingTeams =
+      ui.pageParty->teamsSelect->getPlayingTeams();
+  for (const HWTeam &team : playingTeams)
+    ui.pageParty->teamsSelect->removeNetTeam(team);
+
+  ui.pageParty->rosterList->clear();
+  ui.pageParty->rosterList->addItem(tr("You (host)"));
+
+  m_partyTeamToSid.clear();
+  m_partyActiveSid.clear();
+  m_partyPlaceholders.clear();
+  m_partyAdopted.clear();
+  m_partyGone.clear();
+  m_partyCpuCounter = 0;
+  if (m_partyCore) {
+    // reveals the imposters, opens a fresh lobby (the players left unseated go
+    // first in it) and tells every phone where it sits
+    m_partyCore->gameEnded();
+  }
+  updatePartySlots();
+  updateDynamicCpu();
+}
+
+void HWForm::PartyStart() {
+  if (!partyClient || partyClient->roomCode().isEmpty()) return;
+  if (isPartySeatMode()) {
+    ensurePartyCore();
+    const QString error = m_partyCore->startError();
+    if (!error.isEmpty()) {
+      MessageDialog::ShowErrorMessage(error, this);
+      return;
+    }
+  } else {
+    int humans = 0;
+    for (const HWTeam &team : ui.pageParty->teamsSelect->getPlayingTeams()) {
+      if (!team.owner().startsWith(QStringLiteral("cpu:"))) humans++;
+    }
+    if (humans == 0) {
+      MessageDialog::ShowErrorMessage(
+          PartyClient::tr("No party teams have joined yet"), this);
+      return;
+    }
+  }
+
+  QString ammo =
+      ui.pageParty->gameCFG->WeaponsName
+          ->itemData(ui.pageParty->gameCFG->WeaponsName->currentIndex())
+          .toString();
+
+  if (isPartySeatMode()) {
+    // build the engine teams the core planned: seated hogs are named after
+    // their player and human (difficulty 0), the rest are CPU of the chosen
+    // tier. Switch Hedgehog is masked out of the ammo store for everyone.
+    const QList<PartyHostCore::PlannedTeam> plan = m_partyCore->start();
+    for (const PartyHostCore::PlannedTeam &planned : plan) {
+      HWTeam team;
+      team.setNumHedgehogs(planned.hogs.size());
+      team.setName(planned.name);
+      HWNamegen::teamRandomGrave(team);
+      HWNamegen::teamRandomFort(team);
+      HWNamegen::teamRandomFlag(team);
+      HWNamegen::teamRandomVoice(team);
+      team.setColor(planned.paletteIndex);
+      for (int h = 0; h < planned.hogs.size(); h++) {
+        const PartyHostCore::PlannedHog &plannedHog = planned.hogs.at(h);
+        HWHog hog = team.hedgehog(h);
+        if (plannedHog.human) {
+          hog.Name = plannedHog.name;
+          team.setHedgehog(h, hog);  // difficulty stays 0: human
+        } else {
+          team.setHedgehog(h, hog);
+          HWNamegen::teamRandomHogName(team, h);
+          team.setHogDifficulty(h, m_partyCpuTier);
+        }
+      }
+      HWNamegen::teamRandomHats(team);
+      ui.pageParty->teamsSelect->addTeam(team);
+    }
+    if (ammo.size() > 20) ammo[20] = QLatin1Char('0');  // amSwitcher
+  }
+
+  CreateGame(ui.pageParty->gameCFG, ui.pageParty->teamsSelect, ammo);
+  game->partyMode = true;
+  game->partyTeams = isPartySeatMode();
+  game->StartLocal();
+  partyClient->sendState(QStringLiteral("ingame"));
+  partyClient->sendWeapons(ammo);
+  if (isPartySeatMode()) m_partyCore->announce();
+}
+
+void HWForm::PartyTurnTeamChanged(const QString &teamName, int hogIndex) {
+  if (!partyClient) return;
+  cancelPartyAfk();
+  if (isPartySeatMode() && hogIndex >= 0) {
+    // the core also tells the engine who the traitors are at every turn start
+    const PartyHostCore::TurnInfo turn = m_partyCore->turn(teamName, hogIndex);
+    if (!turn.valid) return;
+    if (!turn.sid.isEmpty()) {
+      m_partyActiveSid = turn.sid;
+      partyClient->sendTurn(teamName, hogIndex, turn.sid);
+      startPartyAfkWatch(teamName, turn.sid);
+    } else {
+      m_partyActiveSid.clear();
+      partyClient->sendTurn(teamName, hogIndex);
+      // vacated claimed seat: skip the turn so it cannot stall the round
+      // (unclaimed seats are CPU-driven and need no skip)
+      if (turn.vacantSkip) sendPartyCommand(QStringLiteral("skip"));
+    }
+    return;
+  }
+  m_partyActiveSid = m_partyTeamToSid.value(teamName);
+  partyClient->sendTurn(teamName, hogIndex);
+  if (!m_partyActiveSid.isEmpty())
+    startPartyAfkWatch(teamName, m_partyActiveSid);
+}
+
+void HWForm::PartyTraitorSwapped(const QString &fromTeam) {
+  if (m_partyCore) m_partyCore->traitorSwapped(fromTeam);
+}
+
+void HWForm::PartyInput(const QString &sid, const QString &action) {
+  if (!game || sid != m_partyActiveSid || action.isEmpty()) return;
+  // Phone actions use headcmd letters for a few controls; the e-prefixed IPC
+  // path only accepts engine variable commands, so translate those letters to
+  // their variable equivalents. Holds (+left etc.), setweap and slot pass
+  // through unchanged.
+  // The controller exposes both jumps: J = hjump (Jump, vertical hop) and
+  // j = ljump (Long Jump, forward leap) — matching the engine's variable
+  // commands and the desktop binds' behaviour.
+  QString cmd = action;
+  if (action == QStringLiteral("j"))
+    cmd = QStringLiteral("ljump");
+  else if (action == QStringLiteral("J"))
+    cmd = QStringLiteral("hjump");
+  else if (action == QStringLiteral("s"))
+    cmd = QStringLiteral("switch");
+  else if (action == QStringLiteral("Z"))
+    cmd = QStringLiteral("+precise");
+  else if (action == QStringLiteral("z"))
+    cmd = QStringLiteral("-precise");
+  else if (action.length() == 1 && action.at(0) >= QLatin1Char('1') &&
+           action.at(0) <= QLatin1Char('5'))
+    cmd = QStringLiteral("timer ") + action;
+  sendPartyCommand(cmd);
+}
+
+void HWForm::PartyCursor(const QString &sid, int x, int y) {
+  if (!game || sid != m_partyActiveSid) return;
+  sendPartyXY('P', x, y);
+}
+
+void HWForm::PartyPut(const QString &sid, int x, int y) {
+  if (!game || sid != m_partyActiveSid) return;
+  sendPartyXY('p', x, y);
+}
+
+void HWForm::sendPartyXY(char cmd, int x, int y) {
+  // 'P' carries RELATIVE cursor deltas in cursor units (the engine applies
+  // them like local mouse deltas and clamps/pans at the screen edges);
+  // 'p' is the put trigger — the engine derives the target from its own
+  // cursor, so no coordinate scaling or clamping happens here. Both frames
+  // are length-prefixed: [len][cmd][int32 BE][int32 BE]
+  const qint32 xb = qToBigEndian<qint32>(cmd == 'P' ? x : 0);
+  const qint32 yb = qToBigEndian<qint32>(cmd == 'P' ? y : 0);
+  QByteArray buf;
+  buf.append(static_cast<char>(9));
+  buf.append(cmd);
+  buf.append(reinterpret_cast<const char *>(&xb), 4);
+  buf.append(reinterpret_cast<const char *>(&yb), 4);
+  game->FromNet(buf);
+}
+
 void HWForm::NetStartServer() {
   config->SaveOptions();
 
@@ -1898,6 +2542,9 @@ void HWForm::GameStateChanged(GameState gameState) {
         ui.pageNetGame->cleanupFakeNetTeams();
       }
       if (game) game->netSuspend = false;
+      // party round over: back to the lobby phase (phones re-register,
+      // host UI purges the finished game's players)
+      if (game && game->partyMode) PartyGameEnded();
       break;
     }
     default: {
@@ -1913,6 +2560,13 @@ void HWForm::GameStateChanged(GameState gameState) {
         Music(ui.pageOptions->CBFrontendMusic->isChecked());
         if (wBackground) wBackground->startAnimation();
         if (hwnet) hwnet->gameFinished(false);
+        // an aborted party game (quit mid-round — the engine either sends Q
+        // [gsInterrupted] or is killed outright [gsStopped]) also ends the
+        // round; gsStopped only reaches us here while the ingame page is up,
+        // so a stop that follows a normal finish (stats page) won't purge
+        if (game && game->partyMode &&
+            (gameState == gsInterrupted || gameState == gsStopped))
+          PartyGameEnded();
       }
       if (gameState == gsHalted) close();
     };
@@ -1937,6 +2591,10 @@ void HWForm::CreateGame(GameCFGWidget *gamecfg, TeamSelWidget *pTeamSelWidget,
   connect(game.data(), &HWGame::ErrorMessage, this,
           &HWForm::ShowFatalErrorMessage, Qt::QueuedConnection);
   connect(game.data(), &HWGame::HaveRecord, this, &HWForm::GetRecord);
+  connect(game.data(), &HWGame::TurnTeamChanged, this,
+          &HWForm::PartyTurnTeamChanged);
+  connect(game.data(), &HWGame::TraitorSwapped, this,
+          &HWForm::PartyTraitorSwapped);
   m_lastDemo.clear();
 }
 

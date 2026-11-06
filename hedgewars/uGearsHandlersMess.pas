@@ -6914,7 +6914,11 @@ if Gear^.Timer < $FFFFFFFF then
 if (Gear^.State and gstTmpFlag <> 0) or (GameTicks and $7 = 0) then
     begin
     doStepFallingGear(Gear);
-    if (Gear^.Tag = 1) and (GameTicks and $FF = 0) and (hwRound(Gear^.X) < leftX) or (hwRound(Gear^.X) > rightX) or (hwRound(Gear^.Y) < topY) then
+    // re-teleport fallers that left the map bounds, including below the
+    // bottom: a faller sinking into the sea would otherwise keep falling
+    // forever (generic fallers never drown), keeping AllInactive false and
+    // stalling the turn state machine before the first turn
+    if (Gear^.Tag = 1) and (GameTicks and $FF = 0) and (hwRound(Gear^.X) < leftX) or (hwRound(Gear^.X) > rightX) or (hwRound(Gear^.Y) < topY) or (hwRound(Gear^.Y) > LAND_HEIGHT) then
         begin
         Gear^.X:= int2hwFloat(GetRandom(rightX-leftX)+leftX);
         Gear^.Y:= int2hwFloat(GetRandom(LAND_HEIGHT-topY)+topY);

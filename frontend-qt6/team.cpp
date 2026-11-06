@@ -36,7 +36,8 @@ HWTeam::HWTeam(const QString& teamname)
       m_difficulty(0),
       m_numHedgehogs(4),
       m_isNetTeam(false),
-      m_isMissionTeam(false) {
+      m_isMissionTeam(false),
+      m_skipRDriven(false) {
   m_name = teamname;
   OldTeamName = m_name;
   for (int i = 0; i < HEDGEHOGS_PER_TEAM; i++) {
@@ -57,7 +58,11 @@ HWTeam::HWTeam(const QString& teamname)
 }
 
 HWTeam::HWTeam(const QStringList& strLst)
-    : QObject(0), m_numHedgehogs(4), m_isNetTeam(true), m_isMissionTeam(false) {
+    : QObject(0),
+      m_numHedgehogs(4),
+      m_isNetTeam(true),
+      m_isMissionTeam(false),
+      m_skipRDriven(false) {
   // net teams are configured from QStringList
   if (strLst.size() != 23) throw HWTeamConstructException();
   m_name = strLst[0];
@@ -86,7 +91,8 @@ HWTeam::HWTeam()
       m_difficulty(0),
       m_numHedgehogs(4),
       m_isNetTeam(false),
-      m_isMissionTeam(false) {
+      m_isMissionTeam(false),
+      m_skipRDriven(false) {
   m_name = QStringLiteral("Team");
   for (int i = 0; i < HEDGEHOGS_PER_TEAM; i++) {
     m_hedgehogs.append(HWHog());
@@ -117,11 +123,13 @@ HWTeam::HWTeam(const HWTeam& other)
       m_voicepack(other.m_voicepack),
       m_hedgehogs(other.m_hedgehogs),
       m_difficulty(other.m_difficulty),
+      m_hogDifficulties(other.m_hogDifficulties),
       m_binds(other.m_binds),
       m_numHedgehogs(other.m_numHedgehogs),
       m_color(other.m_color),
       m_isNetTeam(other.m_isNetTeam),
       m_isMissionTeam(other.m_isMissionTeam),
+      m_skipRDriven(other.m_skipRDriven),
       m_owner(other.m_owner)
 //      , AchievementProgress(other.AchievementProgress)
 {}
@@ -136,12 +144,14 @@ HWTeam& HWTeam::operator=(const HWTeam& other) {
     m_voicepack = other.m_voicepack;
     m_hedgehogs = other.m_hedgehogs;
     m_difficulty = other.m_difficulty;
+    m_hogDifficulties = other.m_hogDifficulties;
     m_binds = other.m_binds;
     m_numHedgehogs = other.m_numHedgehogs;
     m_color = other.m_color;
     m_isNetTeam = other.m_isNetTeam;
-    m_owner = other.m_owner;
     m_isMissionTeam = other.m_isMissionTeam;
+    m_skipRDriven = other.m_skipRDriven;
+    m_owner = other.m_owner;
   }
 
   return *this;
@@ -258,7 +268,11 @@ QStringList HWTeam::teamGameConfig(quint32 InitHealth) const {
             .arg(m_name, QString(QCryptographicHash::hash(
                                      m_owner.toUtf8(), QCryptographicHash::Md5)
                                      .toHex())));
-    sl.push_back(QStringLiteral("erdriven"));
+    // erdriven tells the engine the team is remote-driven so it waits for
+    // net-style input for the whole turn machine; that is right for net play
+    // but fatal for party mode, where the game is local and the engine must
+    // run turns itself (it would otherwise stall before the first turn)
+    if (!m_skipRDriven) sl.push_back(QStringLiteral("erdriven"));
   } else {
     if (m_isMissionTeam) {
       sl.push_back(QStringLiteral("esetmissteam %3 %1 %2")
@@ -280,8 +294,10 @@ QStringList HWTeam::teamGameConfig(quint32 InitHealth) const {
   if (!m_owner.isEmpty()) sl.push_back(QStringLiteral("eowner ") + m_owner);
 
   for (int t = 0; t < m_numHedgehogs; t++) {
+    const int difficulty =
+        t < m_hogDifficulties.size() ? m_hogDifficulties.at(t) : m_difficulty;
     sl.push_back(QString(cmdAddHog + QStringLiteral(" %1 %2 %3"))
-                     .arg(QString::number(m_difficulty),
+                     .arg(QString::number(difficulty),
                           QString::number(InitHealth), m_hedgehogs[t].Name));
     sl.push_back(QStringLiteral("ehat %1").arg(m_hedgehogs[t].Hat));
   }
@@ -289,6 +305,10 @@ QStringList HWTeam::teamGameConfig(quint32 InitHealth) const {
 }
 
 void HWTeam::setNetTeam(bool isNetTeam) { m_isNetTeam = isNetTeam; }
+
+void HWTeam::setSkipRDriven(bool skip) { m_skipRDriven = skip; }
+
+bool HWTeam::skipRDriven() const { return m_skipRDriven; }
 
 bool HWTeam::isNetTeam() const { return m_isNetTeam; }
 
@@ -326,6 +346,11 @@ void HWTeam::setOwner(const QString& owner) { m_owner = owner; }
 // difficulty
 unsigned int HWTeam::difficulty() const { return m_difficulty; }
 void HWTeam::setDifficulty(unsigned int level) { m_difficulty = level; }
+
+void HWTeam::setHogDifficulty(int i, int level) {
+  while (m_hogDifficulties.size() <= i) m_hogDifficulties.append(-1);
+  m_hogDifficulties[i] = level;
+}
 
 // color
 int HWTeam::color() const { return m_color; }

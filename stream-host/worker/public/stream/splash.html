@@ -1,0 +1,64 @@
+<!doctype html>
+<!-- /stream/splash — M12 overlay view: the join splash.
+     Big QR + join URL + live queue count, centered as a scene card.
+     OBS browser source: transparent background, fixed 1920x1080.
+     Options: ?bg=dark opaque, ?scale=x shrink, ?corner=br bottom-right card. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>hw · join splash</title>
+    <style>
+      :root { --ink: #f2ead8; --dim: #b7aed6; --accent: #ffcc00; --accent2: #7ec6ff; --panel: rgba(23,19,53,.85); }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { background: transparent; }
+      body {
+        width: 100vw; height: 100vh; overflow: hidden;
+        color: var(--ink); font-family: "Segoe UI", system-ui, sans-serif;
+        display: flex; align-items: center; justify-content: center;
+        text-shadow: 0 2px 6px rgba(0,0,0,.85);
+      }
+      body.bg { background: #0d0b1e; text-shadow: none; }
+      body.corner { align-items: flex-end; justify-content: flex-end; }
+      .card {
+        display: flex; align-items: center; gap: 2.2vw;
+        background: var(--panel); border: 3px solid var(--accent);
+        border-radius: 22px; padding: 3.2vh 2.4vw;
+      }
+      img { height: 38vh; min-height: 220px; width: auto; display: block; background: #101020; border-radius: 10px; }
+      .txt { display: flex; flex-direction: column; gap: 1.4vh; max-width: 34vw; }
+      .txt b { font-size: clamp(22px, 2.8vw, 44px); }
+      .txt span { color: var(--dim); font-size: clamp(14px, 1.6vw, 24px); line-height: 1.4; }
+      .qcount { color: var(--accent); font-weight: 700; font-size: clamp(16px, 2vw, 32px) !important; }
+      .url { color: var(--accent2); font-weight: 600; font-size: clamp(15px, 1.8vw, 28px) !important; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <img src="/api/queue/qr" alt="Join QR" />
+      <div class="txt">
+        <b>Play on your phone</b>
+        <span class="qcount" id="qcount"></span>
+        <span>Scan to join the queue — the next open seat is yours.</span>
+        <span class="url" id="joinurl"></span>
+      </div>
+    </div>
+    <script type="module">
+      const q = new URLSearchParams(location.search);
+      if (q.get("bg") === "dark") document.body.classList.add("bg");
+      if (q.get("corner") === "br") document.body.classList.add("corner");
+      const s = Number(q.get("scale") ?? 1);
+      if (s !== 1) document.body.style.zoom = String(s);
+      document.getElementById("joinurl").textContent = location.origin + "/";
+      function render(d) {
+        const n = d.queue ?? 0;
+        document.getElementById("qcount").textContent =
+          n > 0 ? `${n} in queue — join them` : "Be first in the queue";
+      }
+      async function poll() {
+        try { render(await (await fetch("/api/queue/state")).json()); } catch {}
+      }
+      poll();
+      setInterval(poll, 2000);
+    </script>
+  </body>
+</html>

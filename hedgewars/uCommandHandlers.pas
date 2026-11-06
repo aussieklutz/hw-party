@@ -883,6 +883,12 @@ begin
 cMinesTime:= StrToInt(s)
 end;
 
+procedure chParty(var s: shortstring);
+begin
+    isPartyMode:= (s = '1') or (s = '2');
+    isPartyTeams:= (s = '2')
+end;
+
 procedure chFastUntilLag(var s: shortstring);
 begin
     fastUntilLag:= StrToInt(s) <> 0;
@@ -1008,6 +1014,7 @@ begin
     RegisterVariable('scriptparam', @chScriptParam, false);
     RegisterVariable('proto'   , @chCheckProto   , true );
     RegisterVariable('spectate', @chFastUntilLag   , false);
+    RegisterVariable('party'   , @chParty         , false);
     RegisterVariable('capture' , @chCapture      , true );
     RegisterVariable('rotmask' , @chRotateMask   , true );
     RegisterVariable('rottags' , @chRotateTags   , true );

@@ -84,6 +84,8 @@ class HWGame : public TCPBase {
   void abort();
   GameState gameState;
   bool netSuspend;
+  bool partyMode;
+  bool partyTeams;
 
  protected:
   virtual QStringList getArguments();
@@ -102,6 +104,10 @@ class HWGame : public TCPBase {
   void CampStateChanged(int);
   void TrainingStateChanged(int);
   void SendConsoleCommand(const QString &command);
+  void TurnTeamChanged(const QString &teamName, int hogIndex);
+  // imposter mode: the engine swapped a team's lone traitor onto the survivors
+  // (the team they LEFT)
+  void TraitorSwapped(const QString &fromTeam);
 
  public Q_SLOTS:
   void FromNet(const QByteArray &msg);
@@ -117,6 +123,7 @@ class HWGame : public TCPBase {
   QPointer<TeamSelWidget> m_pTeamSelWidget;
   GameType gameType;
   QByteArray m_netSendBuffer;
+  QString m_lastTurnTeam;
 
   void commonConfig();
   void SendConfig();

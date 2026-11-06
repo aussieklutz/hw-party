@@ -67,6 +67,8 @@ jobs:
       - name: Install Qt
         if: matrix.os_name == 'linux'
         uses: jurplel/install-qt-action@v4
+        with:
+          modules: qtwebsockets
 
       - name: Install Dependencies (Linux)
         if: matrix.os_name == 'linux'
