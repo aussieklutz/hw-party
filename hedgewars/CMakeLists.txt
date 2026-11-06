@@ -182,7 +182,7 @@ if (DEFINED PHYSFS_LIBRARY_RELEASE)
     endif()
 else()
     get_filename_component(PHYSFS_LIBRARY_DIR ${PHYSFS_LIBRARY} PATH)
-    add_flag_append(CMAKE_Pascal_FLAGS "-Fl${PHYSFS_LIBRARY}")
+    add_flag_append(CMAKE_Pascal_FLAGS "-Fl${PHYSFS_LIBRARY_DIR}")
 endif()
 
 list(APPEND HW_LINK_LIBS physlayer)
