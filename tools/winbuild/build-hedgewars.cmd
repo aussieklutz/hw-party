@@ -48,8 +48,10 @@ copy /y "%Qt6_DIR%/bin/Qt6Core.dll" "%DLLS_DIR%/"
 copy /y "%Qt6_DIR%/bin/Qt6Gui.dll" "%DLLS_DIR%/"
 copy /y "%Qt6_DIR%/bin/Qt6Network.dll" "%DLLS_DIR%/"
 copy /y "%Qt6_DIR%/bin/Qt6Widgets.dll" "%DLLS_DIR%/"
+copy /y "%Qt6_DIR%/bin/Qt6WebSockets.dll" "%DLLS_DIR%/"
 
-copy /y "%Qt6_DIR%/plugins/platforms/qwindows.dll" "%DLLS_DIR%/plugins/platforms"     
+copy /y "%Qt6_DIR%/plugins/platforms/qwindows.dll" "%DLLS_DIR%/plugins/platforms"
+copy /y "%Qt6_DIR%/plugins/tls/*.dll" "%DLLS_DIR%/plugins/tls"
 
 echo Configuring...
 cd %BUILDDIR%

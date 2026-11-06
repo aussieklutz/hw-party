@@ -46,6 +46,17 @@ COPY ./build-qt.cmd .
 
 RUN xvfb-run --auto-servernum wine cmd /c build-qt.cmd && rm -rdf qttools-everywhere-src-6.10.1 qtbase-everywhere-src-6.10.1
 
+# Qt WebSockets module (needed by the party frontend)
+
+RUN wget --no-verbose \
+        https://download.qt.io/official_releases/qt/6.10/6.10.1/submodules/qtwebsockets-everywhere-src-6.10.1.tar.xz \
+    && tar xf qtwebsockets-everywhere-src-6.10.1.tar.xz \
+    && rm qtwebsockets-everywhere-src-6.10.1.tar.xz
+
+COPY ./build-qws.cmd .
+
+RUN xvfb-run --auto-servernum wine cmd /c build-qws.cmd && rm -rdf qtwebsockets-everywhere-src-6.10.1 build-qws.cmd
+
 # Prepare other dependencies for Hedgewars
 
 WORKDIR /
@@ -70,7 +81,7 @@ RUN wget --no-verbose \
 
 # Haskell
 
-RUN wget -qO- https://downloads.haskell.org/~ghc/9.12.3/ghc-9.12.3-x86_64-unknown-mingw32-int_native.tar.xz | tar xJ --verbose
+RUN wget -qO- https://downloads.haskell.org/~ghc/9.12.3/ghc-9.12.3-x86_64-unknown-mingw32-int_native.tar.xz | tar xJ --verbose --no-same-owner
 
 RUN wget --no-verbose https://downloads.haskell.org/cabal/cabal-install-3.16.1.0/cabal-install-3.16.1.0-x86_64-windows.zip \
         https://eternallybored.org/misc/wget/1.21.4/64/wget.exe && \
@@ -98,7 +109,7 @@ COPY ./fpc.cfg FPC/bin/i386-win32
 
 # PHYSFS
 
-RUN wget -qO- https://github.com/icculus/physfs/archive/refs/tags/release-3.2.0.tar.gz | tar xz --verbose
+RUN wget -qO- https://github.com/icculus/physfs/archive/refs/tags/release-3.2.0.tar.gz | tar xz --verbose --no-same-owner
 
 COPY ./build-physfs.cmd .
 
