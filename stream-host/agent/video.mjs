@@ -23,7 +23,7 @@
 // (self-healing inside the loop, complementing Docker's restart: always).
 //
 // env (both modes):
-//   STREAM_WIDTH/HEIGHT display + grab size (default 1920x1080)
+//   STREAM_WIDTH/HEIGHT display + grab size (default 1280x720)
 //   STREAM_DISPLAY      X display id for the engine (default :99)
 //   STREAM_VIDEO=1      legacy full-stack mode
 //   STREAM_DISPLAYS=1   OBS mode: displays + pulse only
@@ -32,8 +32,9 @@ import { spawn } from "node:child_process";
 
 const ENABLED = process.env.STREAM_VIDEO === "1" || process.env.STREAM_DISPLAYS === "1";
 const DISPLAYS_ONLY = process.env.STREAM_DISPLAYS === "1";
-const W = Number(process.env.STREAM_WIDTH ?? 1920);
-const H = Number(process.env.STREAM_HEIGHT ?? 1080);
+const W = Number(process.env.STREAM_WIDTH ?? 1280);
+const H = Number(process.env.STREAM_HEIGHT ?? 720);
+const FPS = Number(process.env.STREAM_FPS ?? 30);
 const DISPLAY = process.env.STREAM_DISPLAY ?? ":99";
 const RTMP_URL = process.env.RTMP_URL ?? "";
 const RECORD_FILE = process.env.STREAM_RECORD ?? "";
@@ -144,7 +145,7 @@ export async function videoInit() {
       cmd: "ffmpeg",
       args: [
         "-hide_banner", "-loglevel", "warning", "-y",
-        "-f", "x11grab", "-framerate", "30", "-video_size", `${W}x${H}`, "-i", DISPLAY,
+        "-f", "x11grab", "-framerate", String(FPS), "-video_size", `${W}x${H}`, "-i", DISPLAY,
         "-f", "pulse", "-i", "hw.monitor",
         "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
         "-pix_fmt", "yuv420p", "-g", "60", "-b:v", "4500k", "-maxrate", "5000k", "-bufsize", "8000k",
@@ -180,8 +181,11 @@ export function videoSetPhase(phase) {
     .then((r) => { if (r.code !== 0) log(`xdotool ${phase}: window not up yet`); });
 }
 
-// fullscreen engine geometry so the window exactly fills the capture
+// fullscreen engine geometry so the window exactly fills the capture; the
+// engine is paced to the capture rate, because without a vsync on the virtual
+// display it would otherwise render ~125 frames a second nobody sees
 export function videoEngineArgs() {
   if (!ENABLED) return [];
-  return ["--fullscreen", "--fullscreen-width", String(W), "--fullscreen-height", String(H)];
+  return ["--fullscreen", "--fullscreen-width", String(W), "--fullscreen-height", String(H),
+    "--frame-interval", String(Math.round(1000 / FPS))];
 }

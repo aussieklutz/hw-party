@@ -178,7 +178,7 @@ same value you gave the worker. The other settings are optional:
 | `POP_COUNT` | players taken from the queue per round (`classic`, `fixed`, `dynamic`) |
 | `CPU_TIER` | CPU difficulty, 1 (insane) to 5 (very easy) |
 | `FEED_URL` | where the video goes (default: the bundled mediamtx) |
-| `STREAM_WIDTH`, `STREAM_HEIGHT`, `STREAM_FPS` | video size and frame rate |
+| `STREAM_WIDTH`, `STREAM_HEIGHT`, `STREAM_FPS` | video size and frame rate (default 1280x720 at 30) |
 | `LOBBY_WAIT_MS`, `ROUND_WAIT_MS`, `SLATE_MS` | timings in milliseconds |
 
 ```

@@ -18,7 +18,7 @@
 //   FEED_URL            push target (e.g. rtmp://127.0.0.1:1935/live/game
 //                       against the compose mediamtx). EMPTY disables the
 //                       feed entirely — local proofs run without it.
-//   STREAM_WIDTH/HEIGHT grab size (default 1920x1080)
+//   STREAM_WIDTH/HEIGHT grab size (default 1280x720)
 //   STREAM_DISPLAY      X display the engine runs on (default :99)
 //   STREAM_FPS          default 30
 //   PULSE_SOURCE        pulse source to record (default hw.monitor)
@@ -31,8 +31,8 @@
 import { spawn } from "node:child_process";
 
 const FEED_URL = process.env.FEED_URL ?? "";
-const W = Number(process.env.STREAM_WIDTH ?? 1920);
-const H = Number(process.env.STREAM_HEIGHT ?? 1080);
+const W = Number(process.env.STREAM_WIDTH ?? 1280);
+const H = Number(process.env.STREAM_HEIGHT ?? 720);
 const DISPLAY = process.env.STREAM_DISPLAY ?? ":99";
 const FPS = Number(process.env.STREAM_FPS ?? 30);
 const PULSE_SOURCE = process.env.PULSE_SOURCE ?? "hw.monitor";
@@ -47,12 +47,17 @@ let backoff = 0;
 function spawnFeed() {
   const args = [
     "-hide_banner", "-loglevel", "warning", "-nostdin",
+    // a deep thread queue lets the grabber ride out a slow frame instead of
+    // blocking, which would grow the delay until OBS shows a stale picture
+    "-thread_queue_size", "512",
     "-f", "x11grab", "-framerate", String(FPS), "-video_size", `${W}x${H}`, "-i", DISPLAY,
+    "-thread_queue_size", "512",
     "-f", "pulse", "-i", PULSE_SOURCE,
     "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
     "-pix_fmt", "yuv420p", "-g", String(FPS * 2),
     "-b:v", "4500k", "-maxrate", "5000k", "-bufsize", "8000k",
     "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
+    "-flush_packets", "1", "-muxdelay", "0",
     "-f", "flv", FEED_URL,
   ];
   log("feed up ->", FEED_URL);
