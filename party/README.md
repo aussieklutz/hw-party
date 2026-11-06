@@ -24,6 +24,9 @@ Open `http://localhost:8787` on the phone. Note: the session cookie omits
 Secure, and WS requires the cookie — so phone testing over LAN http relies on
 the non-Secure cookie path. For an HTTPS dev origin use `npm run dev -- --remote`.
 
+To try the Qt host against a worker, enter its URL on the Party mode page, or
+set `HEDGEWARS_PARTY_URL` in the environment to pre-fill the field.
+
 ## Deploy
 
 ```

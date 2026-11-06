@@ -43,9 +43,24 @@ Layout (scaffolded in M11.1+):
 Run it:
 
 ```
-WORKER_URL=... STREAM_HOST_SECRET=... RTMP_URL=rtmps://a.rtmp.youtube.com/live2/<key> \
-  podman-compose -f stream-host/docker-compose.yml up -d
+cp stream-host/.env.example stream-host/.env    # then fill in WORKER_URL and the secret
+podman-compose -f stream-host/docker-compose.yml up -d
 ```
+
+## Local config
+
+Nothing instance-specific is committed. Real values live in git-ignored files
+next to their tracked `*.example`:
+
+| File (git-ignored) | Template | Holds |
+|---|---|---|
+| `stream-host/.env` | `.env.example` | `WORKER_URL`, `STREAM_HOST_SECRET`, game settings for the compose stack |
+| `*/.dev.vars` | `.dev.vars.example` | secrets and URLs for `wrangler dev` |
+| `*/wrangler.local.toml` | `wrangler.toml` | the deploy-time values (D1 id, public URLs, sender) |
+
+To deploy with your own values, copy the worker's `wrangler.toml` to
+`wrangler.local.toml`, fill in the commented-out settings, and pass it to
+wrangler: `wrangler deploy --config wrangler.local.toml`.
 
 Milestones: M11.1 agent v1 (local proof) → M11.2 Docker + RTMPS capture + slate
 in the feed → M11.3 modes/seats → M11.4 signup worker (Glicko-2 ladder, top-20
