@@ -128,12 +128,6 @@ worker static assets (`assets = { directory = "./public" }` in wrangler.toml,
   Diagonals work (multiple arrows held at once). Click sends a single
   `put 0,0` (place target at the cursor), matching the old pad's tap.
 
-### M6.7 Screenshot documentation
-
-- Capture the themed controller (join page, pad, weapons panel) via the preview
-  browser against `npm run dev`, and store PNGs in `party-mode-docs/`
-  alongside the milestone progress notes (this applies to every milestone).
-
 ### Acceptance
 
 - Controller uses the game font and palette; weapons panel shows real game ammo

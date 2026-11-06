@@ -1,9 +1,7 @@
-# stream-host (M11 + M12)
+# stream-host
 
 Headless Docker host for party games: runs `hwengine` in a container, loops
-games forever from the worker's queue, and heals itself. Design:
-`party-mode-docs/M11-stream-host.md` (agent + container) and
-`party-mode-docs/M12-obs-streaming.md` (the OBS feed mode).
+games forever from the worker's queue, and heals itself.
 
 Two streaming modes:
 
