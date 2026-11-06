@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Signing in…</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<style>
+  body { background:#0d0b1e; color:#f2ead8; font-family:"Segoe UI",system-ui,sans-serif;
+         display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
+  .card { background:rgba(23,19,53,.9); border:1px solid rgba(120,110,190,.5); border-radius:14px;
+          padding:2rem 2.4rem; max-width:26rem; width:90vw; text-align:center; }
+  .err { color:#ff7a7a; }
+  a { color:#ffcc00; }
+</style></head><body><div class="card"><p id="msg">Signing you in…</p></div>
+<script>
+  // The signup worker (the identity provider) sends the player here with a
+  // signed identity token in the URL FRAGMENT, which browsers never send to a
+  // server. Hand it to the worker, which verifies it and keeps it in a cookie.
+  (async () => {
+    const msg = document.getElementById("msg");
+    const token = new URLSearchParams(location.hash.slice(1)).get("token");
+    history.replaceState(null, "", location.pathname); // do not leave the token in history
+    if (!token) { msg.textContent = "Nothing to sign in with."; msg.className = "err"; return; }
+    try {
+      const r = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      if (!r.ok) throw new Error(String(r.status));
+      const d = await r.json();
+      msg.textContent = "Signed in as " + d.name + ". Taking you to the queue…";
+      location.replace("/");
+    } catch {
+      msg.textContent = "That sign-in did not check out. Try again from the stream page.";
+      msg.className = "err";
+    }
+  })();
+</script></body></html>

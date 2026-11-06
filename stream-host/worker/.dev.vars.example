@@ -1,0 +1,5 @@
+PARTY_JWT_SECRET=local-dev-secret-change-me
+STREAM_HOST_SECRET=local-stream-secret-change-me
+# M11.4 signup worker (set in .dev.vars to match the signup worker's secrets)
+SIGNUP_URL=http://127.0.0.1:8791
+SIGNUP_SECRET=local-signup-secret-change-me
