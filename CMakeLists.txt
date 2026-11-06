@@ -277,6 +277,11 @@ enable_testing()
 add_custom_target(test_normal  COMMAND ${CMAKE_CTEST_COMMAND} -E '^todo/' --timeout 300 --schedule-random)
 add_custom_target(test_verbose COMMAND ${CMAKE_CTEST_COMMAND} -E '^todo/' --timeout 300 --schedule-random -V)
 
+# the party host rules can be tested without the engine, see frontend-qt6/tests
+if(NOT ANDROID AND NOT BUILD_ENGINE_JS AND NOT NOFRONTEND)
+    add_subdirectory(frontend-qt6/tests)
+endif()
+
 set(LUATESTS_DIR "${CMAKE_SOURCE_DIR}/tests/lua")
 set(TESTSDATA_DIR "${CMAKE_SOURCE_DIR}/share/hedgewars/Data")
 

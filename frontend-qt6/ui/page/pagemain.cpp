@@ -42,7 +42,7 @@ QLayout* PageMain::bodyLayoutDefinition() {
   pageLayout->setRowStretch(1, 1);
   pageLayout->setRowStretch(2, 0);
   pageLayout->setRowStretch(3, 1);
-  pageLayout->setRowStretch(4, 1);
+  pageLayout->setRowStretch(4, 0);
 
   BtnSinglePlayer = addButton(QStringLiteral(":/res/LocalPlay.png"), pageLayout,
                               2, 0, 1, 2, true);
@@ -91,7 +91,13 @@ QLayout* PageMain::bodyLayoutDefinition() {
   BtnInfo->setWhatsThis(tr("Read about who is behind the Hedgewars Project"));
   pageLayout->setAlignment(BtnInfo, Qt::AlignLeft | Qt::AlignTop);
 
-  BtnFeedback = addButton(tr("Feedback"), pageLayout, 4, 0, 1, 4, false);
+  BtnParty = addButton(tr("Party mode"), pageLayout, 4, 0, 1, 4, false);
+  BtnParty->setStyleSheet(QStringLiteral("padding: 5px 10px"));
+  BtnParty->setWhatsThis(
+      tr("Play with your friends using their phones as controllers"));
+  pageLayout->setAlignment(BtnParty, Qt::AlignHCenter);
+
+  BtnFeedback = addButton(tr("Feedback"), pageLayout, 5, 0, 1, 4, false);
   BtnFeedback->setStyleSheet(QStringLiteral("padding: 5px 10px"));
   BtnFeedback->setWhatsThis(
       tr("Leave a feedback here reporting issues, suggesting features or just "
@@ -99,7 +105,7 @@ QLayout* PageMain::bodyLayoutDefinition() {
   pageLayout->setAlignment(BtnFeedback, Qt::AlignHCenter);
 
   BtnDataDownload =
-      addButton(tr("Downloadable Content"), pageLayout, 5, 0, 1, 4, false);
+      addButton(tr("Downloadable Content"), pageLayout, 6, 0, 1, 4, false);
   BtnDataDownload->setStyleSheet(QStringLiteral("padding: 5px 10px"));
   BtnDataDownload->setWhatsThis(
       tr("Access the user created content downloadable from our website"));

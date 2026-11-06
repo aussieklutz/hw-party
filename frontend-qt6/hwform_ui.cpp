@@ -40,6 +40,7 @@
 #include "pagenetgame.h"
 #include "pagenetserver.h"
 #include "pageoptions.h"
+#include "pageparty.h"
 #include "pageplayrecord.h"
 #include "pageroomslist.h"
 #include "pagescheme.h"
@@ -116,6 +117,9 @@ void Ui_HWForm::SetupPages(QWidget *Parent) {
 
   pageNetServer = new PageNetServer();
   Pages->addWidget(pageNetServer);
+
+  pageParty = new PageParty();
+  Pages->addWidget(pageParty);
 
   pageInGame = new PageInGame();
   Pages->addWidget(pageInGame);

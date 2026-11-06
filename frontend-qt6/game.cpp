@@ -59,6 +59,8 @@ HWGame::HWGame(GameUIConfig *config, GameCFGWidget *gamecfg,
   this->config = config;
   this->gamecfg = gamecfg;
   netSuspend = false;
+  partyMode = false;
+  partyTeams = false;
 
   lastGameCfg = gamecfg;
   lastGameAmmo = ammo;
@@ -130,6 +132,12 @@ void HWGame::commonConfig() {
           buf, team.teamGameConfig(gamecfg->getInitHealth()));
       ;
     }
+  }
+
+  if (partyMode) {
+    HWProto::addStringToBuffer(
+        buf, QStringLiteral("eparty ") +
+                 (partyTeams ? QStringLiteral("2") : QStringLiteral("1")));
   }
 
   RawSendIPC(buf);
@@ -516,6 +524,32 @@ void HWGame::ParseMessage(const QByteArray &msg) {
       config->Form->ui.pageOptions->windowWidthEdit->setValue(wh[0].toInt());
       config->Form->ui.pageOptions->windowHeightEdit->setValue(wh[1].toInt());
       config->vid_SetMaximized(windowMaximized);
+      break;
+    }
+    case 'x': {
+      int size = msg.size();
+      const QString teamName = QString::fromUtf8(msg.mid(2).left(size - 4));
+      m_lastTurnTeam = teamName;
+      Q_EMIT TurnTeamChanged(teamName, -1);
+      break;
+    }
+    case 'z': {
+      // imposter mode: the engine cloned a team's last hog (the traitor) onto
+      // another team; the payload is the team they left
+      int size = msg.size();
+      Q_EMIT TraitorSwapped(QString::fromUtf8(msg.mid(2).left(size - 4)));
+      break;
+    }
+    case 'y': {
+      // party mode companion to 'x': active hog index as a single hex char
+      int size = msg.size();
+      const QByteArray payload = msg.mid(2).left(size - 4);
+      if (payload.isEmpty()) break;
+      const char c = payload.at(0);
+      const int hogIndex = (c >= '0' && c <= '9')   ? c - '0'
+                           : (c >= 'a' && c <= 'f') ? c - 'a' + 10
+                                                    : -1;
+      if (hogIndex >= 0) Q_EMIT TurnTeamChanged(m_lastTurnTeam, hogIndex);
       break;
     }
     case '~': {

@@ -38,6 +38,7 @@ class PageMain : public AbstractPage {
   QPointer<QPushButton> BtnFeedback;
   QPointer<QPushButton> BtnTitle;
   QPointer<QPushButton> BtnInfo;
+  QPointer<QPushButton> BtnParty;
   QPointer<QPushButton> BtnDataDownload;
   QPointer<QPushButton> BtnVideos;
   QPointer<QPushButton> BtnHelp;
