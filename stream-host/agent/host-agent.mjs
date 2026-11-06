@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { filterName } from "./safewords.mjs";
 import { videoInit, videoSetPhase, videoEngineArgs } from "./video.mjs";
 import { setFeedPhase } from "./feed.mjs";
+import { tapStart } from "./tap.mjs";
 import { Lobby } from "./layout.mjs";
 
 const WORKER_URL = process.env.WORKER_URL;
@@ -493,18 +494,24 @@ function handleEngineFrame(p) {
 }
 
 function spawnEngine(port) {
+  const tap = tapStart(); // encoder for this game, when STREAM_TAP=1
   const args = [
     "--internal", "--port", String(port),
+    ...(tap ? tap.engineArgs : []),
     ...videoEngineArgs(),
     ...ENGINE_ARGS,
   ];
   if (ENGINE_PREFIX) args.push("--prefix", ENGINE_PREFIX);
   if (ENGINE_USERPREFIX) args.push("--user-prefix", ENGINE_USERPREFIX);
-  const proc = spawn(ENGINE_BIN, args, { stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn(ENGINE_BIN, args, {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: tap ? { ...process.env, ...tap.env } : process.env,
+  });
   proc.stdout.on("data", (d) => process.stdout.write(`[engine] ${d}`));
   proc.stderr.on("data", (d) => process.stderr.write(`[engine] ${d}`));
   proc.on("exit", (code) => {
     log(`engine exited code=${code}`);
+    if (tap) tap.stop();
     engineProc = null;
     onGameEnd();
   });
