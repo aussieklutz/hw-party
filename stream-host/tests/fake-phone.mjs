@@ -65,7 +65,17 @@ function enterRoom(room) {
         console.log("turn:", m.team, mine ? "MINE" : "");
         if (mine && roomWs.readyState === 1) {
           turns++;
-          if (turns <= 2) {
+          if (process.env.AIM && turns <= 2) {
+            // an airstrike: pick it, steer the cursor, put the target down, fire.
+            // (cursor deltas and puts were once dropped by the agent for being malformed)
+            const send = (o) => roomWs.readyState === 1 && roomWs.send(JSON.stringify(o));
+            send({ type: "input", action: "setweap \u0010" });
+            for (let i = 0; i < 10; i++) setTimeout(() => send({ type: "cursor", x: 25, y: -15 }), 500 + i * 60);
+            setTimeout(() => send({ type: "put", x: 1200, y: 600 }), 1400);
+            setTimeout(() => send({ type: "input", action: "+attack" }), 1800);
+            setTimeout(() => send({ type: "input", action: "-attack" }), 2000);
+            console.log("airstrike sequence sent");
+          } else if (turns <= 2) {
             roomWs.send(JSON.stringify({ type: "input", action: "+right" }));
             setTimeout(() => roomWs.send(JSON.stringify({ type: "input", action: "-right" })), 700);
             setTimeout(() => roomWs.send(JSON.stringify({ type: "input", action: "J" })), 1000);

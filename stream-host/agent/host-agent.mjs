@@ -28,6 +28,7 @@ import { videoInit, videoSetPhase, videoEngineArgs } from "./video.mjs";
 import { setFeedPhase } from "./feed.mjs";
 import { tapStart } from "./tap.mjs";
 import { Lobby } from "./layout.mjs";
+import { frame, xyFrame } from "./frames.mjs";
 
 const WORKER_URL = process.env.WORKER_URL;
 if (!WORKER_URL) {
@@ -130,20 +131,6 @@ function translateAction(a) {
   if (a === "z") return "-precise";
   if (/^[1-5]$/.test(a)) return "timer " + a;
   return a;
-}
-
-function frame(text) {
-  const b = Buffer.from(text, "utf8");
-  if (b.length > 255) throw new Error("frame too long");
-  return Buffer.concat([Buffer.from([b.length]), b]);
-}
-function xyFrame(cmd, x, y) {
-  const buf = Buffer.alloc(9);
-  buf[0] = 9;
-  buf[1] = cmd.charCodeAt(0);
-  buf.writeInt32BE(x | 0, 2);
-  buf.writeInt32BE(y | 0, 6);
-  return buf;
 }
 
 function engineSend(...frames) {
