@@ -16,8 +16,11 @@
 //   ENCODER           qsv | nvenc | x264 (default qsv on Windows, x264 elsewhere)
 //   ENCODER_PRESET    encoder preset (qsv: medium, nvenc: p4, x264: veryfast)
 //   VIDEO_KBPS        constant bitrate in kbit/s (default 6000)
-//   TAP_FILTER        gpu | sw: where qsv converts and flips the frames (default gpu)
+//   TAP_FORMAT        nv12 | bgra: what the engine sends (default nv12: the graphics
+//                     card converts, a third of the data, nothing left to flip)
+//   TAP_FILTER        gpu | sw: where qsv converts and flips bgra frames (default gpu)
 //   TAP_VIDEO_PORT/TAP_AUDIO_PORT  local ports (default 19001/19002)
+//   TAP_STATS         1 logs ffmpeg's own progress (frame rate, duplicated and dropped frames)
 //   FFMPEG_BIN        default ffmpeg
 
 import { spawn } from "node:child_process";
@@ -31,6 +34,7 @@ const ENCODER = process.env.ENCODER ?? (process.platform === "win32" ? "qsv" : "
 const PRESET = process.env.ENCODER_PRESET
   ?? { qsv: "medium", nvenc: "p4", x264: "veryfast" }[ENCODER];
 const KBPS = Number(process.env.VIDEO_KBPS ?? 6000);
+const TAP_FORMAT = process.env.TAP_FORMAT ?? "nv12";
 const TAP_FILTER = process.env.TAP_FILTER ?? "gpu";
 const VIDEO_PORT = Number(process.env.TAP_VIDEO_PORT ?? 19001);
 const AUDIO_PORT = Number(process.env.TAP_AUDIO_PORT ?? 19002);
@@ -38,32 +42,40 @@ const FFMPEG_BIN = process.env.FFMPEG_BIN ?? "ffmpeg";
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), "[tap]", ...a);
 
-// the frames arrive bottom row first; every encoder needs them flipped and in
-// its own pixel format. Constant bitrate with a keyframe every two seconds
-// is what the streaming services ask for.
+// nv12 frames arrive ready for any encoder. bgra frames arrive bottom row
+// first and every encoder needs them flipped and in its own pixel format.
+// Constant bitrate with a keyframe every two seconds is what the streaming
+// services ask for.
+const NV12 = TAP_FORMAT === "nv12";
+// the engine's conversion is BT.709 limited range; say so in the stream
+const TAGS = "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv";
+
 function encoderArgs() {
   const rate = `${KBPS}k`;
   const gop = String(FPS * 2);
   switch (ENCODER) {
     case "qsv":
       return [
-        ...(TAP_FILTER === "gpu"
+        ...(NV12
           ? ["-init_hw_device", "qsv=hw", "-filter_hw_device", "hw",
-             "-vf", "hwupload=extra_hw_frames=32,vpp_qsv=format=nv12:transpose=vflip"]
-          : ["-vf", "vflip,format=nv12"]),
+             "-vf", `${TAGS},hwupload=extra_hw_frames=32`]
+          : TAP_FILTER === "gpu"
+            ? ["-init_hw_device", "qsv=hw", "-filter_hw_device", "hw",
+               "-vf", "hwupload=extra_hw_frames=32,vpp_qsv=format=nv12:transpose=vflip"]
+            : ["-vf", "vflip,format=nv12"]),
         "-c:v", "h264_qsv", "-preset", PRESET,
         "-b:v", rate, "-maxrate", rate, "-bufsize", rate,
         "-g", gop, "-bf", "0", "-look_ahead", "0",
       ];
     case "nvenc":
       return [
-        "-vf", "vflip,format=nv12",
+        "-vf", NV12 ? TAGS : "vflip,format=nv12",
         "-c:v", "h264_nvenc", "-preset", PRESET, "-tune", "ll", "-rc", "cbr",
         "-b:v", rate, "-maxrate", rate, "-bufsize", rate, "-g", gop, "-bf", "0",
       ];
     default:
       return [
-        "-vf", "vflip,format=yuv420p",
+        "-vf", NV12 ? `${TAGS},format=yuv420p` : "vflip,format=yuv420p",
         "-c:v", "libx264", "-preset", PRESET, "-tune", "zerolatency",
         "-b:v", rate, "-minrate", rate, "-maxrate", rate, "-bufsize", rate,
         "-g", gop, "-keyint_min", gop, "-sc_threshold", "0",
@@ -75,6 +87,7 @@ function encoderArgs() {
 function ffmpegArgs() {
   return [
     "-hide_banner", "-loglevel", "warning", "-nostdin",
+    ...(process.env.TAP_STATS === "1" ? ["-stats", "-stats_period", "5"] : []),
     // audio first: the engine connects its audio when it starts up and its video
     // with the first frame, and ffmpeg opens its inputs in this order
     "-probesize", "32768", "-analyzeduration", "0", "-use_wallclock_as_timestamps", "1",
@@ -82,7 +95,7 @@ function ffmpegArgs() {
     "-f", "s16le", "-ar", "44100", "-ac", "2", "-i", `tcp://127.0.0.1:${AUDIO_PORT}?listen`,
     "-analyzeduration", "0", "-use_wallclock_as_timestamps", "1",
     "-thread_queue_size", "64",
-    "-f", "rawvideo", "-pix_fmt", "bgra", "-video_size", `${W}x${H}`, "-i", `tcp://127.0.0.1:${VIDEO_PORT}?listen`,
+    "-f", "rawvideo", "-pix_fmt", NV12 ? "nv12" : "bgra", "-video_size", `${W}x${H}`, "-i", `tcp://127.0.0.1:${VIDEO_PORT}?listen`,
     ...encoderArgs(),
     "-fps_mode", "cfr", "-r", String(FPS),
     "-af", "aresample=async=1000",
@@ -120,6 +133,7 @@ export function tapStart() {
     // no real sound device and, off Windows, no display server either
     env: {
       SDL_AUDIODRIVER: "dummy",
+      ...(NV12 ? { HW_TAP_FORMAT: "nv12" } : {}),
       ...(process.platform === "win32" ? {} : { SDL_VIDEODRIVER: "offscreen" }),
     },
     // the engine closing its sockets ends ffmpeg; this only mops up after a crash

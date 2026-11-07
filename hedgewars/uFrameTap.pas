@@ -41,6 +41,10 @@
  *      holding the game up (default)
  * Modes 1 and 2 need OpenGL 2.1 and fall back to 0 without it.
  * HW_TAP_STATS=1 logs the time spent per frame every few hundred frames.
+ * HW_TAP_FORMAT=nv12 converts the frames to NV12 on the graphics card first (a
+ * third of the data, top row first); the default sends BGRA, bottom row first.
+ * NV12 needs OpenGL 2.0 shaders and a screen size divisible by four, and the
+ * tap stops without them.
  *)
 
 unit uFrameTap;
@@ -62,6 +66,17 @@ const
     connectTimeout = 10000; // the encoder starts listening just before the engine
     // an encoder reads a little of an input before it listens on the next one
     probeSize = 65536;
+    // framebuffers, shaders and what they are asked for (OpenGL 2.0 and 3.0)
+    FBO_FRAMEBUFFER = $8D40;
+    FBO_COLOR0 = $8CE0;
+    FBO_COMPLETE = $8CD5;
+    FBO_BINDING = $8CA6;
+    SH_FRAGMENT = $8B30;
+    SH_COMPILE_STATUS = $8B81;
+    PROG_LINK_STATUS = $8B82;
+    PROG_CURRENT = $8B8D;
+    TEX_BINDING_2D = $8069;
+    TEX_CLAMP_TO_EDGE = $812F;
     // frames in flight on the graphics card, and waiting to be sent
     pboCount = 6;
     // what a pixel buffer is doing in mode 2
@@ -79,6 +94,20 @@ type
     TBufferData = procedure(target: LongWord; size: PtrInt; data: Pointer; usage: LongWord); cdecl;
     TMapBuffer = function(target: LongWord; access: LongWord): Pointer; cdecl;
     TUnmapBuffer = function(target: LongWord): Byte; cdecl;
+    TCreateShader = function(shaderType: LongWord): LongWord; cdecl;
+    TShaderSource = procedure(shader: LongWord; count: LongInt; source: PPChar; length: PLongInt); cdecl;
+    TCompileShader = procedure(shader: LongWord); cdecl;
+    TGetiv = procedure(obj: LongWord; pname: LongWord; params: PLongInt); cdecl;
+    TGetInfoLog = procedure(obj: LongWord; maxLength: LongInt; length: PLongInt; log: PChar); cdecl;
+    TCreateProgram = function: LongWord; cdecl;
+    TAttachShader = procedure(prog: LongWord; shader: LongWord); cdecl;
+    TLinkProgram = procedure(prog: LongWord); cdecl;
+    TUseProgram = procedure(prog: LongWord); cdecl;
+    TGetUniformLocation = function(prog: LongWord; name: PChar): LongInt; cdecl;
+    TUniform1f = procedure(location: LongInt; value: Single); cdecl;
+    TUniform1i = procedure(location: LongInt; value: LongInt); cdecl;
+    TFramebufferTexture2D = procedure(target, attachment, textarget, texture: LongWord; level: LongInt); cdecl;
+    TCheckFramebufferStatus = function(target: LongWord): LongWord; cdecl;
 
 var videoSock, audioSock: PTCPSocket;
     frameBuffer: PByte;
@@ -111,6 +140,31 @@ var videoSock, audioSock: PTCPSocket;
     audioLock: PSDL_Mutex;
     audioThread: PSDL_Thread;
     audioQuit, audioFailed: boolean;
+
+    // NV12 conversion on the graphics card
+    tapNV12: boolean;
+    readWidth, readHeight: LongInt;
+    readFormat: LongWord;
+    convProgram, convTexture, convFramebuffer: LongWord;
+    glCreateShaderP: TCreateShader;
+    glShaderSourceP: TShaderSource;
+    glCompileShaderP: TCompileShader;
+    glGetShaderivP, glGetProgramivP: TGetiv;
+    glGetShaderInfoLogP: TGetInfoLog;
+    glCreateProgramP: TCreateProgram;
+    glAttachShaderP: TAttachShader;
+    glLinkProgramP: TLinkProgram;
+    glUseProgramP: TUseProgram;
+    glGetUniformLocationP: TGetUniformLocation;
+    glUniform1fP: TUniform1f;
+    glUniform1iP: TUniform1i;
+    glGenFramebuffersP: TGenBuffers;
+    glBindFramebufferP: TBindBuffer;
+    glFramebufferTexture2DP: TFramebufferTexture2D;
+    glCheckFramebufferStatusP: TCheckFramebufferStatus;
+    savedViewport: array[0..3] of LongInt;
+    savedTexture, savedFramebuffer, savedProgram, savedMatrixMode: LongInt;
+    savedCaps: array[0..8] of boolean;
 
     perfFreq: QWord;
     statFrames, statDropped: LongInt;
@@ -199,6 +253,202 @@ begin
         and (glMapBufferP <> nil) and (glUnmapBufferP <> nil)
 end;
 
+// The frame as NV12 (a plane of luma, then a plane of interleaved blue and red
+// differences at half the size, top row first, BT.709 limited range): a third
+// of the bytes of BGRA and what encoders take as it is. A fragment shader
+// writes it into a small texture four bytes to a texel, which is then read
+// back like any other frame.
+const
+    convSource: AnsiString =
+        '#version 120' + #10 +
+        'uniform sampler2D tex;' + #10 +
+        'uniform float w;' + #10 +
+        'uniform float h;' + #10 +
+        'float luma(float x, float y) {' + #10 +
+        '    vec3 c = texture2D(tex, vec2((x + 0.5) / w, (h - y - 0.5) / h)).rgb;' + #10 +
+        '    return 16.0 + dot(c, vec3(46.559, 156.629, 15.812));' + #10 +
+        '}' + #10 +
+        'float byteAt(float o) {' + #10 +
+        '    if (o < w * h) {' + #10 +
+        '        float row = floor((o + 0.5) / w);' + #10 +
+        '        return luma(o - row * w, row);' + #10 +
+        '    }' + #10 +
+        '    float i = o - w * h;' + #10 +
+        '    float j = floor(i * 0.5);' + #10 +
+        '    float cy = floor((j + 0.5) / (w * 0.5));' + #10 +
+        '    float cx = j - cy * (w * 0.5);' + #10 +
+        '    vec3 c = texture2D(tex, vec2((2.0 * cx + 1.0) / w, (h - 1.0 - 2.0 * cy) / h)).rgb;' + #10 +
+        '    if (mod(i, 2.0) < 0.5)' + #10 +
+        '        return 128.0 + dot(c, vec3(-25.664, -86.336, 112.0));' + #10 +
+        '    return 128.0 + dot(c, vec3(112.0, -101.730, -10.270));' + #10 +
+        '}' + #10 +
+        'void main() {' + #10 +
+        '    float o = (floor(gl_FragCoord.y) * (w * 0.25) + floor(gl_FragCoord.x)) * 4.0;' + #10 +
+        '    vec4 v = vec4(byteAt(o), byteAt(o + 1.0), byteAt(o + 2.0), byteAt(o + 3.0));' + #10 +
+        '    gl_FragColor = floor(clamp(v, 0.0, 255.0) + 0.5) / 255.0;' + #10 +
+        '}' + #10;
+
+    convCaps: array[0..8] of LongWord = (GL_BLEND, GL_DEPTH_TEST, GL_SCISSOR_TEST,
+        GL_STENCIL_TEST, GL_CULL_FACE, GL_ALPHA_TEST, GL_DITHER, GL_COLOR_LOGIC_OP,
+        GL_LIGHTING);
+
+function GetProc(core, ext: PChar): Pointer;
+begin
+    GetProc:= SDL_GL_GetProcAddress(core);
+    if GetProc = nil then
+        GetProc:= SDL_GL_GetProcAddress(ext)
+end;
+
+function BuildConversion: boolean;
+var shader, target: LongWord;
+    src: PChar;
+    status: LongInt;
+    log: array[0..511] of Char;
+    version: PChar;
+begin
+    BuildConversion:= false;
+    if frameWidth mod 4 <> 0 then
+        exit;
+    if frameHeight mod 4 <> 0 then
+        exit;
+    version:= PChar(glGetString(GL_VERSION));
+    if (version = nil) or (Ord(version[0]) - 48 < 2) then
+        exit;
+
+    glCreateShaderP:= TCreateShader(SDL_GL_GetProcAddress('glCreateShader'));
+    glShaderSourceP:= TShaderSource(SDL_GL_GetProcAddress('glShaderSource'));
+    glCompileShaderP:= TCompileShader(SDL_GL_GetProcAddress('glCompileShader'));
+    glGetShaderivP:= TGetiv(SDL_GL_GetProcAddress('glGetShaderiv'));
+    glGetShaderInfoLogP:= TGetInfoLog(SDL_GL_GetProcAddress('glGetShaderInfoLog'));
+    glCreateProgramP:= TCreateProgram(SDL_GL_GetProcAddress('glCreateProgram'));
+    glAttachShaderP:= TAttachShader(SDL_GL_GetProcAddress('glAttachShader'));
+    glLinkProgramP:= TLinkProgram(SDL_GL_GetProcAddress('glLinkProgram'));
+    glGetProgramivP:= TGetiv(SDL_GL_GetProcAddress('glGetProgramiv'));
+    glUseProgramP:= TUseProgram(SDL_GL_GetProcAddress('glUseProgram'));
+    glGetUniformLocationP:= TGetUniformLocation(SDL_GL_GetProcAddress('glGetUniformLocation'));
+    glUniform1fP:= TUniform1f(SDL_GL_GetProcAddress('glUniform1f'));
+    glUniform1iP:= TUniform1i(SDL_GL_GetProcAddress('glUniform1i'));
+    glGenFramebuffersP:= TGenBuffers(GetProc('glGenFramebuffers', 'glGenFramebuffersEXT'));
+    glBindFramebufferP:= TBindBuffer(GetProc('glBindFramebuffer', 'glBindFramebufferEXT'));
+    glFramebufferTexture2DP:= TFramebufferTexture2D(GetProc('glFramebufferTexture2D', 'glFramebufferTexture2DEXT'));
+    glCheckFramebufferStatusP:= TCheckFramebufferStatus(GetProc('glCheckFramebufferStatus', 'glCheckFramebufferStatusEXT'));
+    if (glCreateShaderP = nil) or (glShaderSourceP = nil) or (glCompileShaderP = nil)
+        or (glGetShaderivP = nil) or (glGetShaderInfoLogP = nil) or (glCreateProgramP = nil)
+        or (glAttachShaderP = nil) or (glLinkProgramP = nil) or (glGetProgramivP = nil)
+        or (glUseProgramP = nil) or (glGetUniformLocationP = nil) or (glUniform1fP = nil)
+        or (glUniform1iP = nil) or (glGenFramebuffersP = nil) or (glBindFramebufferP = nil)
+        or (glFramebufferTexture2DP = nil) or (glCheckFramebufferStatusP = nil) then
+        exit;
+
+    shader:= glCreateShaderP(SH_FRAGMENT);
+    src:= PChar(convSource);
+    glShaderSourceP(shader, 1, @src, nil);
+    glCompileShaderP(shader);
+    glGetShaderivP(shader, SH_COMPILE_STATUS, @status);
+    if status = 0 then
+        begin
+        log[0]:= #0;
+        glGetShaderInfoLogP(shader, 511, nil, @log[0]);
+        WriteLnToConsole('Frame tap: converter does not compile: ' + shortstring(PChar(@log[0])));
+        exit
+        end;
+    convProgram:= glCreateProgramP();
+    glAttachShaderP(convProgram, shader);
+    glLinkProgramP(convProgram);
+    glGetProgramivP(convProgram, PROG_LINK_STATUS, @status);
+    if status = 0 then
+        begin
+        WriteLnToConsole('Frame tap: converter does not link');
+        exit
+        end;
+
+    // the screen to read from, and the texture the converter draws into
+    glGenTextures(1, @convTexture);
+    glBindTexture(GL_TEXTURE_2D, convTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, TEX_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, TEX_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, frameWidth, frameHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nil);
+
+    glGenTextures(1, @target);
+    glBindTexture(GL_TEXTURE_2D, target);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, frameWidth div 4, frameHeight * 3 div 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, nil);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    glGenFramebuffersP(1, @convFramebuffer);
+    glBindFramebufferP(FBO_FRAMEBUFFER, convFramebuffer);
+    glFramebufferTexture2DP(FBO_FRAMEBUFFER, FBO_COLOR0, GL_TEXTURE_2D, target, 0);
+    status:= glCheckFramebufferStatusP(FBO_FRAMEBUFFER);
+    glBindFramebufferP(FBO_FRAMEBUFFER, 0);
+    if status <> FBO_COMPLETE then
+        begin
+        WriteLnToConsole('Frame tap: no framebuffer to convert in');
+        exit
+        end;
+
+    glUseProgramP(convProgram);
+    glUniform1iP(glGetUniformLocationP(convProgram, 'tex'), 0);
+    glUniform1fP(glGetUniformLocationP(convProgram, 'w'), frameWidth);
+    glUniform1fP(glGetUniformLocationP(convProgram, 'h'), frameHeight);
+    glUseProgramP(0);
+    BuildConversion:= true
+end;
+
+// Draws the screen as NV12 into the converter's texture and leaves its
+// framebuffer bound for reading; EndConversion puts back what the game uses.
+procedure BeginConversion;
+var i: LongInt;
+begin
+    glGetIntegerv(GL_VIEWPORT, @savedViewport[0]);
+    glGetIntegerv(TEX_BINDING_2D, @savedTexture);
+    glGetIntegerv(FBO_BINDING, @savedFramebuffer);
+    glGetIntegerv(PROG_CURRENT, @savedProgram);
+    glGetIntegerv(GL_MATRIX_MODE, @savedMatrixMode);
+    for i:= 0 to High(convCaps) do
+        begin
+        savedCaps[i]:= glIsEnabled(convCaps[i]) <> 0;
+        glDisable(convCaps[i])
+        end;
+
+    glBindTexture(GL_TEXTURE_2D, convTexture);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, frameWidth, frameHeight);
+
+    glBindFramebufferP(FBO_FRAMEBUFFER, convFramebuffer);
+    glViewport(0, 0, frameWidth div 4, frameHeight * 3 div 2);
+    glUseProgramP(convProgram);
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+    glBegin(GL_QUADS);
+    glVertex2f(-1, -1);
+    glVertex2f(1, -1);
+    glVertex2f(1, 1);
+    glVertex2f(-1, 1);
+    glEnd();
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(savedMatrixMode)
+end;
+
+procedure EndConversion;
+var i: LongInt;
+begin
+    glUseProgramP(savedProgram);
+    glBindFramebufferP(FBO_FRAMEBUFFER, savedFramebuffer);
+    glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3]);
+    glBindTexture(GL_TEXTURE_2D, savedTexture);
+    for i:= 0 to High(convCaps) do
+        if savedCaps[i] then
+            glEnable(convCaps[i])
+end;
+
 function SenderThread(data: Pointer): LongInt; cdecl;
 var buf: LongInt;
 begin
@@ -256,6 +506,9 @@ begin
     frameWidth:= cScreenWidth;
     frameHeight:= cScreenHeight;
     frameSize:= frameWidth * frameHeight * 4;
+    readWidth:= frameWidth;
+    readHeight:= frameHeight;
+    readFormat:= GL_BGRA_FORMAT;
     perfFreq:= SDL_GetPerformanceFrequency();
     statStart:= SDL_GetPerformanceCounter();
 
@@ -264,6 +517,27 @@ begin
     if mode <> '' then
         tapMode:= StrToIntDef(mode, 2);
     showStats:= GetEnvironmentVariable('HW_TAP_STATS') <> '';
+
+    tapNV12:= GetEnvironmentVariable('HW_TAP_FORMAT') = 'nv12';
+    if tapNV12 then
+        begin
+        glGetIntegerv(TEX_BINDING_2D, @savedTexture);
+        if BuildConversion then
+            begin
+            frameSize:= frameWidth * frameHeight * 3 div 2;
+            readWidth:= frameWidth div 4;
+            readHeight:= frameHeight * 3 div 2;
+            readFormat:= GL_RGBA
+            end
+        else
+            begin
+            WriteLnToConsole('Frame tap: cannot convert frames to NV12 here, stopping');
+            tapFailed:= true
+            end;
+        glBindTexture(GL_TEXTURE_2D, savedTexture);
+        if tapFailed then
+            exit
+        end;
 
     if (tapMode > 0) and (not LoadBufferFunctions) then
         begin
@@ -290,7 +564,15 @@ begin
         sender:= SDL_CreateThread(@SenderThread, 'frametap', nil)
         end;
 
-    WriteLnToConsole('Frame tap: mode ' + IntToStr(tapMode))
+    if tapNV12 then
+        WriteLnToConsole('Frame tap: mode ' + IntToStr(tapMode) + ', NV12')
+    else
+        WriteLnToConsole('Frame tap: mode ' + IntToStr(tapMode))
+end;
+
+procedure ReadFrame(target: Pointer);
+begin
+    glReadPixels(0, 0, readWidth, readHeight, readFormat, GL_UNSIGNED_BYTE, target)
 end;
 
 procedure ReportStats;
@@ -316,7 +598,7 @@ procedure TapFrameBlocking;
 var t0, t1, t2: QWord;
 begin
     t0:= SDL_GetPerformanceCounter();
-    glReadPixels(0, 0, frameWidth, frameHeight, GL_BGRA_FORMAT, GL_UNSIGNED_BYTE, frameBuffer);
+    ReadFrame(frameBuffer);
     t1:= SDL_GetPerformanceCounter();
     if SDLNet_TCP_Send(videoSock, frameBuffer, frameSize) < frameSize then
         begin
@@ -337,7 +619,7 @@ begin
     t0:= SDL_GetPerformanceCounter();
     current:= pboFrames mod pboCount;
     glBindBufferP(PBO_PACK_BUFFER, pbo[current]);
-    glReadPixels(0, 0, frameWidth, frameHeight, GL_BGRA_FORMAT, GL_UNSIGNED_BYTE, nil);
+    ReadFrame(nil);
     inc(pboFrames);
     t1:= SDL_GetPerformanceCounter();
     t2:= t1;
@@ -402,7 +684,7 @@ begin
     if target >= 0 then
         begin
         glBindBufferP(PBO_PACK_BUFFER, pbo[target]);
-        glReadPixels(0, 0, frameWidth, frameHeight, GL_BGRA_FORMAT, GL_UNSIGNED_BYTE, nil);
+        ReadFrame(nil);
         pboState[target]:= psPending;
         pboAge[target]:= pboFrames
         end
@@ -459,6 +741,11 @@ begin
 
     if not frameReady then
         PrepareFrames;
+    if tapFailed then
+        begin
+        StopVideoTap;
+        exit
+        end;
 
     // the consumer expects one fixed size
     if (cScreenWidth <> frameWidth) or (cScreenHeight <> frameHeight) then
@@ -468,11 +755,15 @@ begin
         exit
         end;
 
+    if tapNV12 then
+        BeginConversion;
     case tapMode of
         0: TapFrameBlocking;
         1: TapFrameBuffered;
         else TapFrameThreaded
     end;
+    if tapNV12 then
+        EndConversion;
 
     inc(statFrames);
     if showStats and (statFrames >= statsFrames) then
