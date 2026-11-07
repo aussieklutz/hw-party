@@ -109,6 +109,37 @@ docker compose -f stream-host/docker-compose.yml \
 integrated one). This is for WSL2 only; on a Linux host use the vendor's
 container toolkit instead.
 
+## Testing the weapons
+
+`tests/weapons-cdp.mjs` plays real games through the web controller to use every
+weapon: a headless Chrome opens the phone page, joins the queue and, turn by turn,
+picks each weapon from the Weapons panel, aims with the pointer pad and fires with
+the Fire button. The proof is the engine's own game log (`Logs/game0.log`), which
+records every gear a shot creates (`AddGear: ... type = gtGrenade`), so a weapon
+counts as used only when the engine made what that weapon makes.
+
+Run it against a local worker (`wrangler dev -c wrangler.local.toml --port 8790`) and
+a host agent started with the test aids (set them in `.env`):
+
+| Setting | Effect |
+|---|---|
+| `AMMO_ALL=1` | every weapon in every store, nine of each, no delay |
+| `HOG_HEALTH=500` | every hedgehog starts on this health |
+| `SD_TURNS=500` | rounds before sudden death (default 15) |
+| `AMMO_KAMIKAZE=9` | the Kamikaze count of each store |
+
+`node tests/weapons-cdp.mjs` (env `AGENT_LOG`, `WEAPONS` to pick some, `OUT_DIR` for the
+report). Two kinds of weapon cannot always be used and are reported as blocked, not
+failed: the engine takes Air Attack, Mine Strike, Napalm, Drill Strike and Piano
+Strike out of a game whose map has a border (the phone still lists them), and it
+always removes the unfinished Creeper. Hedgehogs drown and rounds end, so the run
+rejoins the queue and carries on.
+
+`tests/frames.mjs` checks the frames the agent sends the engine (a cursor move or a
+put once threw and was dropped); `tests/queued-admit.mjs` checks that a player
+admitted from the queue before saving a team can still save one in the room (needs a
+worker with no round open).
+
 ## Local config
 
 Nothing instance-specific is committed. Real values live in git-ignored files

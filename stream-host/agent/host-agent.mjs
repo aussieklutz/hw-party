@@ -289,7 +289,10 @@ function updateCpu() {
 }
 
 // ---------------------------------------------------------------- config --
-const AMMO_QT_BASE = "939192942219912103223511100120000000021110010101111100010001";
+const AMMO_QT_STOCK = "939192942219912103223511100120000000021110010101111100010001";
+// test aid (unset in production): AMMO_ALL=1 puts every weapon in every store,
+// nine of each, with no delay before it can be used - to exercise them all.
+const AMMO_QT_BASE = process.env.AMMO_ALL ? "9".repeat(AMMO_QT_STOCK.length) : AMMO_QT_STOCK;
 // test aid (unset in production): AMMO_KAMIKAZE=<0-9> sets the Kamikaze count
 // of every team store. The stock loadout gives each TEAM a single Kamikaze,
 // too few to script several teammates self-destructing.
@@ -302,7 +305,12 @@ const AMMO_QT_KAMI = process.env.AMMO_KAMIKAZE
 // not on offer at all, and a hole in either layer is not enough.
 const AMMO_QT = SEAT_MODE ? AMMO_QT_KAMI.slice(0, 20) + "0" + AMMO_QT_KAMI.slice(21) : AMMO_QT_KAMI;
 const AMMO_PROB = "040504054160065554655446477657666666615551010111541111111073";
-const AMMO_DELAY = "000000000000020550000004000700400000000022000000060002000000";
+const AMMO_DELAY = process.env.AMMO_ALL ? "0".repeat(60) : "000000000000020550000004000700400000000022000000060002000000";
+// test aid (unset in production): HOG_HEALTH=<n> starts every hedgehog on n, so a
+// long scripted game is not cut short by deaths
+const HOG_HEALTH = Math.max(1, Math.min(9999, Number(process.env.HOG_HEALTH) || 100));
+// test aid (unset in production): SD_TURNS=<n> rounds before sudden death (default 15)
+const SD_TURNS = Math.max(1, Math.min(9999, Number(process.env.SD_TURNS) || 15));
 const AMMO_CRATE = "131111031211111112311411111111111111121111111111111111111111";
 
 function buildConfigLines() {
@@ -318,8 +326,8 @@ function buildConfigLines() {
     "e$gmflags 0",
     "e$damagepct 100",
     "e$turntime 45000",
-    "e$inithealth 100",
-    "e$sd_turns 15",
+    `e$inithealth ${HOG_HEALTH}`,
+    `e$sd_turns ${SD_TURNS}`,
     "e$casefreq 5",
     "e$minestime 3000",
     "e$minesnum 4",
@@ -358,7 +366,7 @@ function buildConfigLines() {
         const seat = seatOf[TEAM_BASE[t.name] + i];
         d = seat && seat.sid ? 0 : CPU_TIER;
       }
-      cfg.push(`eaddhh ${d} 100 ${h.name}`);
+      cfg.push(`eaddhh ${d} ${HOG_HEALTH} ${h.name}`);
       cfg.push("ehat NoHat");
       void i;
     });
