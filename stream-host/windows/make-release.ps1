@@ -20,6 +20,7 @@ $ErrorActionPreference = "Stop"
 $here = $PSScriptRoot
 $stream = Split-Path $here -Parent
 $repo = Split-Path $stream -Parent
+$tar = Join-Path $env:SystemRoot "System32\tar.exe" # bsdtar writes zips; a GNU tar earlier on the PATH (Git Bash) does not
 
 foreach ($need in @("$Game\hwengine.exe", "$Game\Data", "$Ffmpeg\ffmpeg.exe")) {
     if (-not (Test-Path $need)) { throw "missing $need" }
@@ -39,7 +40,7 @@ try {
     $tracked = Join-Path $stage "export.tar"
     git -C $repo archive --format=tar -o $tracked HEAD stream-host/agent stream-host/data stream-host/windows stream-host/.env.example
     if ($LASTEXITCODE) { throw "git archive failed" }
-    tar -xf $tracked -C $stage
+    & $tar -xf $tracked -C $stage
     $src = Join-Path $stage "stream-host"
     Copy-Item "$src\agent" $dest -Recurse
     Copy-Item "$src\data" $dest -Recurse
@@ -68,7 +69,7 @@ try {
     $outDir = Split-Path -Parent ([IO.Path]::GetFullPath($Out))
     New-Item -ItemType Directory -Force -Path $outDir | Out-Null
     if (Test-Path $Out) { Remove-Item $Out -Force }
-    tar -a -c -f $Out -C $stage "hw-stream-win"
+    & $tar -a -c -f $Out -C $stage "hw-stream-win"
     if ($LASTEXITCODE) { throw "tar failed" }
     "{0}  ({1:N0} MB)" -f $Out, ((Get-Item $Out).Length / 1MB)
 }
