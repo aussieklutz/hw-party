@@ -1,11 +1,13 @@
 // queued-admit.mjs - a player who waits in the queue and is let into a room BEFORE saving a
-// team can still save one there.
+// team can still save one there, and the same page is let into the next round's room too.
 //
 // The page treated "queued" as true for good once it had seen a queue position, so after the
 // admission "Save team" still sent the team down the (already closed) queue socket and nothing
 // happened: no team, no seat. This joins the queue while no round is open, starts the host
 // agent (lobby only: its engine is a stand-in that exits at once) so the queue admits the
-// browser, and then saves a team in the room.
+// browser, and then saves a team in the room. The round then runs out its 15 second countdown,
+// the host releases everyone and opens the next round: the page used to ignore that admission
+// (`entering` and `inRoom` were never cleared), so a player stayed in the queue for good.
 //
 //   node tests/queued-admit.mjs     (worker already up on BASE, no host agent running)
 // (it needs a worker with no round open: after a host agent has run, restart `wrangler dev` with a clean state)
@@ -95,7 +97,7 @@ try {
   agent.proc = spawn(process.execPath, [join(here, "..", "agent", "host-agent.mjs")], {
     env: {
       ...process.env, WORKER_URL: BASE, ROOM_MODE: "dynamic", STREAM_HOST_SECRET: SECRET, ENGINE_BIN: process.execPath,
-      LOBBY_WAIT_MS: "600000", ROUND_WAIT_MS: "600000", SLATE_MS: "1000", POP_COUNT: "2",
+      LOBBY_WAIT_MS: "600000", ROUND_WAIT_MS: "15000", SLATE_MS: "1000", POP_COUNT: "2",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -112,6 +114,16 @@ try {
   const registered = await until("the host to register the team", async () => /registered team "/.test(agent.log), 8000).then(() => true, () => false);
   check("Save team in the room registers the team with the host", registered, `bound name ${name}; ${registered ? "" : "the host never saw a team"}`);
   check("the team form goes away once the team is saved", await b.eval(`document.getElementById("teamform").hidden`));
+
+  // the round ends (the stand-in engine exits when the countdown is over), the host releases
+  // everyone and opens the next round: the same page must be admitted into that room too
+  const joined = () => b.eval(`[...new Set(performance.getEntriesByType("resource").map((r) => (r.name.match(/[/]api[/]rooms[/]([A-Z0-9]+)[/]join/) || [])[1]).filter(Boolean))]`);
+  const second = await until("a second round", async () => { const rooms = await joined(); return rooms.length >= 2 ? rooms : null; }, 150000, 1000).then((r) => r, () => null);
+  check("the same page is admitted into the next round's room too", !!second, second ? second.join(" then ") : "still waiting in the queue after the first round ended");
+  if (!second) {
+    console.log("--- host agent output:\n" + agent.log.split("\n").slice(-12).join("\n"));
+    console.log("--- page: " + (await b.eval(`document.body.innerText`)).replace(/\n+/g, " | ").slice(0, 300));
+  }
 } catch (e) {
   check("queued-admit completed", false, e.message);
 } finally {

@@ -256,6 +256,7 @@
       }
 
       async function joinQueue() {
+        inRoom = false; // back in line: an instant admission must be able to enter the next room
         try { if (queueWs) { queueWs.onclose = null; queueWs.close(); } } catch {}
         const res = await fetch("/api/queue/join", { method: "POST" });
         if (res.status === 409) {
@@ -313,8 +314,10 @@
         if (entering || inRoom) return;
         entering = true;
         try { if (queueWs) { queueWs.onclose = null; queueWs.close(); } } catch {}
-        const res = await fetch(`/api/rooms/${roomCode}/join`, { method: "POST" });
-        if (!res.ok) { entering = false; await joinQueue(); return; }
+        let res;
+        try { res = await fetch(`/api/rooms/${roomCode}/join`, { method: "POST" }); }
+        finally { entering = false; } // the next round's admission must get through again
+        if (!res.ok) { await joinQueue(); return; }
         document.getElementById("join").hidden = true;
         queueCard.hidden = true;
         document.getElementById("game").hidden = false;
