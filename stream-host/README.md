@@ -93,6 +93,16 @@ frames; `TAP_STATS=1` makes the agent log ffmpeg's own frame rate and its
 duplicated and dropped frames. The Windows launcher gives mediamtx a 60 second timeout instead of 10,
 because the engine sends nothing while a game loads.
 
+### Packing a release
+
+`windows\make-release.ps1` zips the committed agent, launcher and docs together with the
+binaries you point it at (`-Game`, `-Ffmpeg`, optionally `-Mediamtx`), stamps the commit
+into `VERSION.txt` and refuses to run with uncommitted changes or to pack a `.env`:
+
+```
+powershell -ExecutionPolicy Bypass -File windows\make-release.ps1 -Game C:\build\game -Ffmpeg C:\tools\ffmpeg -Mediamtx C:\tools\mediamtx -Out hw-stream-win.zip
+```
+
 ## GPU rendering (WSL2)
 
 Without a GPU the engine renders in software on the virtual display and uses
