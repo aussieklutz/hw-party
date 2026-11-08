@@ -46,8 +46,8 @@ services:
       STREAM_DISPLAYS: "1"
       STREAM_VIDEO: "0"
       FEED_URL: ${FEED_URL:-rtmp://127.0.0.1:1935/live/game}
-      STREAM_WIDTH: ${STREAM_WIDTH:-1920}
-      STREAM_HEIGHT: ${STREAM_HEIGHT:-1080}
+      STREAM_WIDTH: ${STREAM_WIDTH:-1280}
+      STREAM_HEIGHT: ${STREAM_HEIGHT:-720}
       STREAM_FPS: ${STREAM_FPS:-30}
       WORKER_URL: ${WORKER_URL:?set WORKER_URL to your stream worker}
       ROOM_MODE: ${ROOM_MODE:-dynamic}

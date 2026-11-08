@@ -34,7 +34,7 @@ program hwengine;
 uses {$IFDEF IPHONEOS}cmem, {$ENDIF} SDLh, uMisc, uConsole, uGame, uConsts, uLand, uAmmos, uVisualGears, uGears, uStore, uWorld, uInputHandler
      , uSound, uScript, uTeams, uStats, uIO, uLocale, uChat, uAI, uAIMisc, uAILandMarks, uLandTexture, uCollisions
      , SysUtils, uTypes, uVariables, uCommands, uUtils, uCaptions, uDebug, uCommandHandlers, uLandPainted
-     , uPhysFSLayer, uCursor, uRandom, ArgParsers, uVisualGearsHandlers, uTextures, uRender
+     , uPhysFSLayer, uCursor, uRandom, ArgParsers, uVisualGearsHandlers, uTextures, uRender, uFrameTap
      {$IFDEF USE_VIDEO_RECORDING}, uVideoRec {$ENDIF}
      {$IFDEF USE_TOUCH_INTERFACE}, uTouch {$ENDIF}
      {$IFDEF ANDROID}, GLUnit{$ENDIF}
@@ -571,6 +571,7 @@ begin
         uRender.freeModule;
         uStore.freeModule;          // closes SDL
 {$IFDEF USE_VIDEO_RECORDING}uVideoRec.freeModule;{$ENDIF}
+        uFrameTap.freeModule;
 {$IFDEF USE_TOUCH_INTERFACE}uTouch.freeModule;{$ENDIF}  //stub
 {$IFDEF ANDROID}GLUnit.freeModule;{$ENDIF}
         uTextures.freeModule;

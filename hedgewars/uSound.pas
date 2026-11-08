@@ -131,7 +131,7 @@ var Volume: LongInt;
     SoundTimerTicks: Longword;
     LastVoiceFailed: boolean;
 implementation
-uses uVariables, uConsole, uCommands, uDebug, uPhysFSLayer;
+uses uVariables, uConsole, uCommands, uDebug, uPhysFSLayer, uFrameTap;
 
 const chanTPU = 32;
 var cInitVolume: LongInt;
@@ -437,6 +437,7 @@ begin
     Mix_AllocateChannels(Succ(chanTPU));
     previousVolume:= cInitVolume;
     ChangeVolume(cInitVolume);
+    InitAudioTap;
 end;
 
 procedure ResetSound;
