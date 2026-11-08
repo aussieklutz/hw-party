@@ -38,12 +38,13 @@ export async function startMediamtx(port) {
 /** Records the stream like a plain viewer: ffmpeg copying the RTMP stream into a file; retries until the stream exists. */
 export function startRecorder(url, file, { seconds = 0, retryMs = 30000 } = {}) {
   const t = tools();
-  const args = ["-hide_banner", "-loglevel", "warning", "-nostdin", "-fflags", "nobuffer", "-i", url, "-c", "copy",
+  const args = ["-hide_banner", "-loglevel", "warning", "-fflags", "nobuffer", "-i", url, "-c", "copy",
     ...(seconds ? ["-t", String(seconds)] : []), "-f", "flv", "-y", file];
   const rec = { proc: null, err: "", startedAt: 0, stopping: false };
   const deadline = Date.now() + retryMs;
   const launch = () => {
-    const p = spawn(t.ffmpeg, args, { stdio: ["ignore", "ignore", "pipe"] });
+    const p = spawn(t.ffmpeg, args, { stdio: ["pipe", "ignore", "pipe"] });
+    p.stdin.on("error", () => {});
     rec.proc = p; rec.err = "";
     p.stderr.on("data", (d) => (rec.err += d));
     const t1 = Date.now();
@@ -59,8 +60,8 @@ export function startRecorder(url, file, { seconds = 0, retryMs = 30000 } = {}) 
       const p = rec.proc;
       if (!p || p.exitCode != null) return res();
       p.once("exit", res);
-      try { p.kill("SIGINT"); } catch {}
-      setTimeout(() => { try { p.kill(); } catch {} res(); }, 4000);
+      try { p.stdin.write("q"); } catch {}   // ffmpeg quits cleanly on q
+      setTimeout(() => { try { p.kill(); } catch {} res(); }, 5000);
     }),
   };
 }
@@ -114,7 +115,9 @@ export function analyze(file, { fps = 60, kbps = 6000 } = {}) {
   if (out.bframes) out.problems.push(`${out.bframes} packets with pts != dts (B frames)`);
   if (out.audioDts.maxGap > frame * 2.5) out.problems.push(`audio gap of ${out.audioMaxGapMs} ms`);
   if (out.videoDts.maxGap > 3 / fps) out.problems.push(`video gap of ${Math.round(out.videoDts.maxGap * 1000)} ms`);
-  const badKeys = out.keyIntervals.filter((k) => Math.abs(k - 2) > 0.1);
-  if (badKeys.length) out.problems.push(`keyframe intervals off 2 s: ${badKeys.join(",")}`);
+  // Twitch wants a keyframe at least every 2 s; an encoder may add more (scene changes)
+  const badKeys = out.keyIntervals.filter((k) => k > 2.1);
+  out.extraKeyframes = out.keyIntervals.filter((k) => k < 1.9).length;
+  if (badKeys.length) out.problems.push(`keyframe intervals over 2 s: ${badKeys.join(",")}`);
   return out;
 }

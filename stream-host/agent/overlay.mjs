@@ -18,8 +18,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Worker } from "node:worker_threads";
 import { decodePng } from "./pngdec.mjs";
-import { buildLayer } from "./layer.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -133,6 +133,13 @@ export async function startOverlay({ url, width, height, onLayer, log = () => {}
     return { x, y, w: (w + 1) & ~1, h: (h + 1) & ~1 };
   }
 
+  // screenshots become layers in a worker thread
+  const worker = new Worker(new URL("./layer-worker.mjs", import.meta.url));
+  const jobs = new Map(); let jobId = 0;
+  worker.on("message", (m) => { const j = jobs.get(m.id); jobs.delete(m.id); if (j) m.error ? j.rej(new Error(m.error)) : j.res(m); });
+  worker.on("error", (e) => log("overlay worker failed:", e.message));
+  const toLayer = (png, x, y) => new Promise((res, rej) => { const id = ++jobId; jobs.set(id, { res, rej }); worker.postMessage({ id, png, x, y }); });
+
   let lastPng = null, lastBox = "", gone = false, gen = 0;
   async function capture() {
     if (navigating || !currentUrl) return;
@@ -149,10 +156,8 @@ export async function startOverlay({ url, width, height, onLayer, log = () => {}
     const key = `${box.x},${box.y},${box.w},${box.h}`;
     if (key === lastBox && lastPng && png.equals(lastPng)) return;
     lastBox = key; lastPng = png;
-    const t0 = performance.now();
-    const img = decodePng(png);
-    const layer = buildLayer(img.rgba, img.width, img.height, box.x, box.y);
-    const ms = performance.now() - t0;
+    const { layer, ms } = await toLayer(png, box.x, box.y);
+    if (myGen !== gen) return;
     stats.decodeMs += ms; stats.layers++; stats.maxDecodeMs = Math.max(stats.maxDecodeMs, ms);
     onLayer(layer);
   }
@@ -183,6 +188,6 @@ export async function startOverlay({ url, width, height, onLayer, log = () => {}
   await setUrl(url);
   return {
     setUrl, stats,
-    async stop() { gone = true; try { ws.close(); } catch {} kill(); await loop.catch(() => {}); },
+    async stop() { gone = true; try { ws.close(); } catch {} kill(); worker.terminate(); await loop.catch(() => {}); },
   };
 }

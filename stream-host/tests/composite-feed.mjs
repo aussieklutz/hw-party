@@ -10,7 +10,7 @@
 //      here so that the test needs no GPU), TEST_PORT (19350), TEST_TAP (19101), HW_STAGE (folder
 //      with ffmpeg\ and mediamtx\), TEST_OUT (scratch folder), PHASES ("6,8,5,8,5" seconds:
 //      slate, game, slate, game, slate), OVERLAY_URL (default tests/fixtures/overlay-stub.html)
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -45,6 +45,9 @@ try {
   const file = join(OUT, "feed.flv");
   // wait for the publisher, then record
   rec = startRecorder(url, file);
+  // the timeline starts once the viewer is receiving
+  for (let i = 0; i < 300 && !(existsSync(file) && statSync(file).size > 0); i++) await sleep(100);
+  await sleep(1000);
   const t0 = Date.now();
   const marks = [];   // [phase name, start s, end s] on the recording's own clock (since the recorder start)
   let t = 0;
