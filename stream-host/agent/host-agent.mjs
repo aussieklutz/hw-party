@@ -27,6 +27,7 @@ import { filterName } from "./safewords.mjs";
 import { videoInit, videoSetPhase, videoEngineArgs } from "./video.mjs";
 import { setFeedPhase } from "./feed.mjs";
 import { tapStart } from "./tap.mjs";
+import { compositeEnabled, compositeStart } from "./composite.mjs";
 import { Lobby } from "./layout.mjs";
 import { frame, xyFrame } from "./frames.mjs";
 
@@ -1074,6 +1075,14 @@ async function main() {
     process.exit(1);
   }
   await videoInit();
+  if (compositeEnabled) {
+    // one encoder for the whole session: the engine connects to the agent's ports for every game
+    if (process.env.STREAM_TAP !== "1") { console.error("FEED_MODE=composite needs STREAM_TAP=1"); process.exit(2); }
+    const comp = await compositeStart();
+    const bye = () => comp.stop().finally(() => process.exit(0));
+    process.on("SIGINT", bye);
+    process.on("SIGTERM", bye);
+  }
 
   for (;;) {
     // slate: the slides cycle (commentary -> scoreboard -> how-to-play) while

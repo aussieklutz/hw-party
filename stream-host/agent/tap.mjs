@@ -22,6 +22,7 @@
 //   TAP_VIDEO_PORT/TAP_AUDIO_PORT  local ports (default 19001/19002)
 //   TAP_STATS         1 logs ffmpeg's own progress (frame rate, duplicated and dropped frames)
 //   FFMPEG_BIN        default ffmpeg
+//   FEED_MODE         composite: one ffmpeg for the whole session, see composite.mjs
 
 import { spawn } from "node:child_process";
 
@@ -105,9 +106,33 @@ function ffmpegArgs() {
   ];
 }
 
-/** Starts the encoder for one game; null when the tap is off. */
+// the engine's side of the tap: the same arguments and environment whoever listens on the ports
+function engineSide() {
+  return {
+    engineArgs: [
+      "--stream-video-port", String(VIDEO_PORT),
+      "--stream-audio-port", String(AUDIO_PORT),
+      "--hidden", "--nodampen",
+      "--width", String(W), "--height", String(H),
+      "--frame-interval", String(Math.max(1, Math.floor(1000 / FPS))),
+    ],
+    // no real sound device and, off Windows, no display server either
+    env: {
+      SDL_AUDIODRIVER: "dummy",
+      ...(NV12 ? { HW_TAP_FORMAT: "nv12" } : {}),
+      ...(process.platform === "win32" ? {} : { SDL_VIDEODRIVER: "offscreen" }),
+    },
+  };
+}
+
+/**
+ * Starts the encoder for one game; null when the tap is off. With FEED_MODE=composite there is
+ * no encoder per game: composite.mjs owns the ports for the whole session and only the engine's
+ * arguments are handed out (it needs NV12, which is the default).
+ */
 export function tapStart() {
   if (!ENABLED) return null;
+  if (process.env.FEED_MODE === "composite") return { ...engineSide(), stop() {} };
   const args = ffmpegArgs();
   log(`encoder ${ENCODER} ${W}x${H}@${FPS} ${KBPS}k -> ${FEED_URL}`);
   let proc;
@@ -123,19 +148,7 @@ export function tapStart() {
   });
   proc.on("exit", (code, sig) => log(`ffmpeg exited code=${code} sig=${sig}`));
   return {
-    engineArgs: [
-      "--stream-video-port", String(VIDEO_PORT),
-      "--stream-audio-port", String(AUDIO_PORT),
-      "--hidden", "--nodampen",
-      "--width", String(W), "--height", String(H),
-      "--frame-interval", String(Math.max(1, Math.floor(1000 / FPS))),
-    ],
-    // no real sound device and, off Windows, no display server either
-    env: {
-      SDL_AUDIODRIVER: "dummy",
-      ...(NV12 ? { HW_TAP_FORMAT: "nv12" } : {}),
-      ...(process.platform === "win32" ? {} : { SDL_VIDEODRIVER: "offscreen" }),
-    },
+    ...engineSide(),
     // the engine closing its sockets ends ffmpeg; this only mops up after a crash
     stop() {
       setTimeout(() => {
