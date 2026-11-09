@@ -162,6 +162,34 @@ try {
     log("phase: cursor done");
   }
 
+  // the weapons panel from the engine's own ammo view: counts, and weapons that are not available yet
+  if (process.env.WEAPONS === "1") {
+    log("phase: weapons view");
+    const read = () => b.eval(`[...document.querySelectorAll("#wgridwrap .wcell")].filter(c=>c.querySelector(".wcount")).map(c=>c.querySelector(".wname").textContent+"="+(c.classList.contains("dim")?"x":"")+c.querySelector(".wcount").textContent).join("  ")`);
+    const openPanel = async () => { await b.click("#weaponsBtn"); await until("weapons panel", () => b.eval(`document.getElementById("weaponspanel").classList.contains("open")`), 4000, 100); };
+    const pick = async (name) => {
+      await openPanel();
+      await b.eval(`(()=>{const cells=[...document.querySelectorAll("#wgridwrap .wcell")];const i=cells.findIndex(c=>c.querySelector(".wname")?.textContent===${JSON.stringify(name)});cells.forEach((c,j)=>c.dataset.pick=j===i?"1":"");})()`);
+      await b.click('#wgridwrap .wcell[data-pick="1"]'); await sleep(250); await b.click("#wclose"); await sleep(300);
+    };
+    await openPanel();
+    const r1 = await read();
+    console.log(`   at the start of the turn: ${r1}`);
+    check("the engine's ammo view reached the weapons panel (counts shown)", /Grenade=\d/.test(r1) || /Grenade=∞/.test(r1), r1.slice(0, 80));
+    check("some weapons are shown as not yet available", /=x?in \d/.test(r1), "");
+    const count = (r, n) => { const m = r.split("  ").find((x) => x.startsWith(n + "=")); return m ? m.slice(n.length + 1).replace(/^x/, "") : null; };
+    await b.click("#wclose"); await sleep(300);
+    await pick("Cluster Bomb");
+    await b.hold("#fire", 400);
+    await sleep(3500);
+    await openPanel();
+    const r2 = await read();
+    console.log(`   after throwing a cluster bomb: ${r2}`);
+    const g1 = count(r1, "Cluster Bomb"), g2 = count(r2, "Cluster Bomb");
+    check("using a weapon takes one off the count", g1 !== null && g2 !== null && (g1 === g2 ? g1 === "∞" : Number(g2) === Number(g1) - 1), `cluster bombs ${g1} -> ${g2}`);
+    await b.click("#wclose");
+  }
+
   // where did the engine say the hog was, relative to the middle of the frame?
   await sleep(1500);
   const hf = join(OUT, "dbg", "hints.json");

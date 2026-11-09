@@ -485,6 +485,9 @@ function handleEngineFrame(p) {
       imp.defected = true;
       log(`imposter ${imp.name} defected from ${from}`);
     }
+  } else if (c === 0x56 /* V — the active team's ammo: a count and the turns to wait per weapon, tick suffix stripped */) {
+    // only the player whose turn it is gets it (the room keeps the latest for a tab that connects later)
+    if (activeSid) send({ type: "ammo", sid: activeSid, ammo: p.toString("latin1", 1, p.length - 2) });
   } else if (c === 0x71 /* q */) {
     log("engine quit");
   } else if (process.env.AGENT_TRACE) {

@@ -222,7 +222,55 @@ export default {
     // ---- stream queue: the code-free join point for the stream host ----
     // The screen name is never taken from the client: a signed-in account
     // keeps its own name, everyone else is given AnonAlpha, AnonBeta, ...
+    // Resuming: a browser that comes back (a closed tab, a reload) still holds its session cookie, and a signed-in
+    // account may come from another tab or device. Whoever asks takes over the seat the browser or the account holds
+    // in the line or in the open round (one seat per account: the newest tab or device wins, the older one is closed).
+    // `adopt` is the queue's answer, or null when there is nothing to resume.
+    const adoptSeat = async (req: Request, acct: { sub: string } | null) => {
+      const held = await getSession(req, env.PARTY_JWT_SECRET);
+      const heldSid = held && (held.room === "queue" || held.role === "controller") ? held.sid : undefined;
+      if (!heldSid && !acct) return null;
+      const res = await queueStub(env).fetch("https://queue/resume", {
+        method: "POST",
+        body: JSON.stringify({ sid: heldSid, sub: acct?.sub }),
+      });
+      if (!res.ok) return null;
+      const r = await res.json<{ state: string; sid?: string; room?: string; position?: number; total?: number; name?: string }>();
+      return r.state === "none" || !r.sid ? null : { ...r, heldSid };
+    };
+    const seatResponse = async (
+      req: Request,
+      r: NonNullable<Awaited<ReturnType<typeof adoptSeat>>>,
+      registered: boolean,
+    ) => {
+      const cookie = await sessionCookie({ room: "queue", sid: r.sid!, role: "spectator" }, env, req);
+      const body = r.state === "admitted"
+        ? { admitted: true, room: r.room, name: r.name }
+        : { position: r.position, total: r.total, name: r.name };
+      return new Response(JSON.stringify({ state: r.state, ...body, registered, resumed: true, takenOver: !!r.heldSid && r.heldSid !== r.sid }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Set-Cookie": cookie, "Cache-Control": "no-store" },
+      });
+    };
+
+    // what the page asks when it loads: is there a seat to resume? (state none: nothing, show the Join button)
+    if (url.pathname === "/api/queue/resume" && req.method === "GET") {
+      const acct = await getAccount(req, env.IDP_PUBLIC_JWK);
+      const r = await adoptSeat(req, acct);
+      if (!r) {
+        return new Response(JSON.stringify({ state: "none", registered: !!acct }), {
+          headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        });
+      }
+      return seatResponse(req, r, !!acct);
+    }
+
     if (url.pathname === "/api/queue/join" && req.method === "POST") {
+      {
+        const acct0 = await getAccount(req, env.IDP_PUBLIC_JWK);
+        const r = await adoptSeat(req, acct0);
+        if (r) return seatResponse(req, r, !!acct0);
+      }
       let sid: string = crypto.randomUUID();
       // a player the host sent back to the FRONT of the queue (still unseated
       // when the round started) still holds their round session: they keep

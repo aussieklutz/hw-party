@@ -42,6 +42,13 @@ What you set by hand:
   /stream/ slide show by default), OVERLAY_GAME_URL (a page drawn over the game, off by default,
   for example <WORKER_URL>/stream/scoreboard.html), SLATE_COLOR, OVERLAY=0, VIDEO_KBPS.
 
+The controller: a player who closes the tab by accident and browses back resumes where they were (their place in
+the line for two minutes, or their seat in the round, with the team they built), and a signed-in account holds ONE
+seat: opening the controller in a newer tab or on another device takes the seat over from the old one, which says
+so and stays out of the way (with a "Take control here" button). The new tab gets the cutout and the weapons too.
+The weapons panel shows how many of each weapon are left (and greys out the ones with none left or that are not
+available yet, with the number of turns to wait).
+
 The sound: the stream has the game's sound effects and voices but no background music (STREAM_MUSIC=1 in .env
 brings it back; the engine's audio then runs about 10% slow and the sound is choppy). Audio and picture are
 delayed by half a second (AUDIO_JITTER_MS, VIDEO_DELAY_MS) so that bursts from the engine do not reach the stream.
