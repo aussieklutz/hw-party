@@ -500,6 +500,7 @@ if isPartyMode then
     // player starts their aim from a known position; the uWorld helper also
     // syncs the camera motion baseline so the camera still focuses the next
     // hedgehog at the start of the turn
+    SendAmmoView;
     PartyRecentreCursor
     end
 end;

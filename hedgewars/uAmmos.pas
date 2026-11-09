@@ -46,11 +46,12 @@ procedure ResetWeapons;
 function  GetAmmoByNum(num: LongInt): PHHAmmo;
 function  GetCurAmmoEntry(var Hedgehog: THedgehog): PAmmo;
 function  GetAmmoEntry(var Hedgehog: THedgehog; am: TAmmoType): PAmmo;
+procedure SendAmmoView;
 
 var StoreCnt: LongInt;
 
 implementation
-uses uVariables, uCommands, uUtils, uCaptions, uDebug, uScript;
+uses uVariables, uCommands, uUtils, uCaptions, uDebug, uScript, uIO;
 
 type TAmmoArray = array[TAmmoType] of TAmmo;
 var StoresList: array[0..Pred(cMaxHHs)] of PHHAmmo;
@@ -210,6 +211,41 @@ for t:= 0 to Pred(TeamsCount) do
         end
 end;
 
+// What the active hedgehog's team can use, for a party/stream frontend that shows it to the player whose turn it is
+// ('V' notice): two characters per ammo type in the engine's order, the count ('0'-'8', '9' for nine or more, '*'
+// for infinite) and the turns still to wait before it can be used ('0' now, '1'-'9'). 120 characters.
+procedure SendAmmoView;
+var a: TAmmoType;
+    e: PAmmo;
+    s: shortstring;
+    c: char;
+    wait: LongInt;
+begin
+if (not isPartyMode) or (CurrentTeam = nil) then
+    exit;
+s:= 'V';
+for a:= Succ(amNothing) to High(TAmmoType) do
+    begin
+    e:= GetAmmoEntry(CurrentTeam^.Hedgehogs[CurrentTeam^.CurrHedgehog], a);
+    if e^.AmmoType <> a then
+        s:= s + '00'
+    else
+        begin
+        if e^.Count >= AMMO_INFINITE then
+            c:= '*'
+        else if e^.Count > 9 then
+            c:= '9'
+        else
+            c:= chr(48 + e^.Count);
+        wait:= Ammoz[a].SkipTurns - CurrentTeam^.Clan^.TurnNumber + 1;
+        if wait < 0 then wait:= 0;
+        if wait > 9 then wait:= 9;
+        s:= s + c + chr(48 + wait)
+        end
+    end;
+SendIPC(s)
+end;
+
 procedure AddAmmo(var Hedgehog: THedgehog; ammo: TAmmoType; amt: LongWord);
 var cnt: LongWord;
     a: PAmmo;
@@ -224,6 +260,9 @@ if (cnt >= AMMO_INFINITE) or (amt >= AMMO_INFINITE) then
 else
     cnt:= min(AMMO_FINITE_MAX, cnt + amt);
 SetAmmo(Hedgehog, ammo, cnt);
+// a crate picked up by the active team changes what its player can use
+if (CurrentTeam <> nil) and (Hedgehog.Team = CurrentTeam) then
+    SendAmmoView;
 end;
 
 procedure AddAmmo(var Hedgehog: THedgehog; ammo: TAmmoType);
@@ -315,6 +354,7 @@ with Hedgehog do
                 end
             end
     end;
+SendAmmoView;
 end;
 
 function  HHHasAmmo(var Hedgehog: THedgehog; Ammo: TAmmoType): LongWord;
