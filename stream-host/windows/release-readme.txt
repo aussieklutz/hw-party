@@ -42,6 +42,9 @@ What you set by hand:
   /stream/ slide show by default), OVERLAY_GAME_URL (a page drawn over the game, off by default,
   for example <WORKER_URL>/stream/scoreboard.html), SLATE_COLOR, OVERLAY=0, VIDEO_KBPS.
 
+The view: the game is zoomed to 150% (STREAM_ZOOM in .env; 100 is the engine's default, 175 the closest)
+and the camera keeps the active hog in the middle of the frame.
+
 The close-up: while a player has the turn, their phone shows a small live picture of their hog (about
 15 pictures a second, sent to that phone only, never to Twitch) above the cursor keys, with a "Close-up"
 button to switch it off. HOG_VIEW=0 in .env turns it off for everyone. It needs the hwengine.exe that
