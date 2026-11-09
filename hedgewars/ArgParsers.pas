@@ -248,7 +248,7 @@ begin
 end;
 
 function parseParameter(cmd:string; arg:string; var paramIndex:LongInt): Boolean;
-const reallyAll: array[0..40] of shortstring = (
+const reallyAll: array[0..41] of shortstring = (
                 '--prefix', '--user-prefix', '--locale', '--fullscreen-width', '--fullscreen-height', '--width',
                 '--height', '--maximized', '--frame-interval', '--volume','--nomusic', '--nosound', '--nodampen',
                 '--fullscreen', '--showfps', '--altdmg', '--low-quality', '--raw-quality', '--stereo', '--nick',
