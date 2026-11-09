@@ -20,10 +20,10 @@ export async function startMediamtx(port) {
   const t = tools();
   const dir = t.mediamtx.replace(/[\\/][^\\/]*$/, "");
   const p = spawn(t.mediamtx, [], {
-    cwd: dir, stdio: "ignore",
+    cwd: dir, stdio: process.env.MTX_VERBOSE ? "inherit" : "ignore",
     env: {
       ...process.env, MTX_RTMPADDRESS: `:${port}`, MTX_RTSP: "no", MTX_HLS: "no", MTX_WEBRTC: "no", MTX_SRT: "no",
-      MTX_API: "no", MTX_METRICS: "no", MTX_PPROF: "no", MTX_PLAYBACK: "no", MTX_READTIMEOUT: "60s", MTX_WRITETIMEOUT: "60s",
+      MTX_API: "no", ...(process.env.MTX_VERBOSE ? { MTX_LOGLEVEL: "debug" } : {}), MTX_METRICS: "no", MTX_PPROF: "no", MTX_PLAYBACK: "no", MTX_READTIMEOUT: "60s", MTX_WRITETIMEOUT: "60s",
     },
   });
   for (let i = 0; i < 40; i++) {
@@ -120,4 +120,53 @@ export function analyze(file, { fps = 60, kbps = 6000 } = {}) {
   out.extraKeyframes = out.keyIntervals.filter((k) => k < 1.9).length;
   if (badKeys.length) out.problems.push(`keyframe intervals over 2 s: ${badKeys.join(",")}`);
   return out;
+}
+
+/** Runs fn while holding the shared GPU lock (mkdir is atomic); always releases it. */
+export async function withGpuLock(fn, { wait = 15 * 60 * 1000 } = {}) {
+  const dir = process.env.GPU_LOCK ?? "C:/Users/clint/.t3/scratch/exp/gpu.lock";
+  const { mkdirSync, rmdirSync } = await import("node:fs");
+  const deadline = Date.now() + wait;
+  for (;;) {
+    try { mkdirSync(dir); break; } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      if (Date.now() > deadline) throw new Error("gave up waiting for the GPU lock");
+      await sleep(20000);
+    }
+  }
+  const release = () => { try { rmdirSync(dir); } catch {} };
+  process.once("exit", release);
+  try { return await fn(); } finally { release(); }
+}
+
+/** CPU seconds used so far by each pid (PowerShell Get-Process), plus the Chrome pids of an overlay (by its profile dir marker). */
+export function cpuSeconds(pids) {
+  if (!pids.length) return {};
+  const r = spawnSync("powershell", ["-NoProfile", "-Command",
+    `Get-Process -Id ${pids.join(",")} -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Id) $($_.TotalProcessorTime.TotalSeconds)" }`], { encoding: "utf8" });
+  const out = {};
+  for (const l of r.stdout.split("\n")) { const [a, b] = l.trim().split(" "); if (a && b) out[a] = Number(b); }
+  return out;
+}
+export function pidsByCommandLine(marker) {
+  const r = spawnSync("powershell", ["-NoProfile", "-Command",
+    `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${marker}*' -and $_.Name -ne 'powershell.exe' } | ForEach-Object { $_.ProcessId }`], { encoding: "utf8" });
+  return r.stdout.split("\n").map((x) => Number(x.trim())).filter(Boolean);
+}
+
+/** GPU engine utilisation (Windows counters) summed per engine type for the given pids; one sample. */
+export function gpuSample(pids) {
+  const r = spawnSync("powershell", ["-NoProfile", "-Command",
+    `(Get-Counter '\GPU Engine(*)\Utilization Percentage' -ErrorAction SilentlyContinue).CounterSamples | ForEach-Object { "$($_.InstanceName)|$($_.CookedValue)" }`],
+  { encoding: "utf8", maxBuffer: 1 << 24 });
+  const per = {}, all = {};
+  for (const l of r.stdout.split("\n")) {
+    const [inst, v] = l.trim().split("|");
+    if (!inst) continue;
+    const m = /pid_(\d+).*engtype_(\w+)/.exec(inst);
+    if (!m) continue;
+    all[m[2]] = (all[m[2]] ?? 0) + Number(v);
+    if (pids.includes(Number(m[1]))) per[m[2]] = (per[m[2]] ?? 0) + Number(v);
+  }
+  return { mine: per, all };
 }

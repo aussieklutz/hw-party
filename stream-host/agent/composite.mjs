@@ -34,9 +34,14 @@
 //   AUDIO_KBPS        AAC bitrate (default 160)
 //   QSV_ASYNC_DEPTH, QSV_PRESET, QSV_LOW_POWER, QSV_SCENARIO, QSV_LOW_DELAY_BRC, QSV_EXTRA
 //                     Quick Sync tuning, see qsvArgs()
+//   FEED_PRIORITY     high (default) | normal: the agent and its ffmpeg run at high process priority. The frame
+//                     clock needs a wake-up every few ms; on a busy PC a normal priority process was measured
+//                     stalling for 100+ ms at a time (p99 80 ms vs 7 ms at high priority)
 //   COMPOSITE_STATS   1 logs the forwarder's counters every 10 s
 
 import net from "node:net";
+import os from "node:os";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { spawn, spawnSync } from "node:child_process";
 import { startOverlay } from "./overlay.mjs";
 import { blendLayer, solidNV12, rgbToYuv } from "./layer.mjs";
@@ -118,7 +123,7 @@ export function videoArgs(encoder) {
       // no look ahead (that would switch the rate control from CBR to LA), game streaming hints
       return [
         "-init_hw_device", "qsv=hw", "-filter_hw_device", "hw",
-        "-vf", `${TAGS},hwupload=extra_hw_frames=${env.QSV_EXTRA_FRAMES ?? 4}`,
+        "-vf", `${TAGS},hwupload=extra_hw_frames=${env.QSV_EXTRA_FRAMES ?? 32}`,
         "-c:v", "h264_qsv", "-preset", env.QSV_PRESET ?? "veryfast",
         "-async_depth", env.QSV_ASYNC_DEPTH ?? "1",
         ...(env.QSV_LOW_POWER ? ["-low_power", env.QSV_LOW_POWER] : []),
@@ -175,6 +180,11 @@ export function ffmpegArgs(encoder, audioPort, videoPort, out = FEED) {
  * Returns { engineArgs, env, stats(), stop() }.
  */
 export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySlateUrl } = {}) {
+  const raise = (pid) => {
+    if (env.FEED_PRIORITY === "normal") return;
+    try { os.setPriority(pid, os.constants.priority.PRIORITY_HIGH); } catch (e) { log("could not raise priority:", e.message); }
+  };
+  raise(process.pid);
   const encoder = pickEncoder();
   const stats = {
     encoder, ffmpegStarts: 0, slots: 0, gameSlots: 0, slateSlots: 0, dupSlots: 0, droppedSlots: 0, lateSlots: 0,
@@ -294,7 +304,14 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
       for (let i = 0; i < Math.min(due, 24); i++, slot++) {
         stats.slots++;
         // backlog towards ffmpeg: drop this slot (video and its audio together), never stall the engine
-        if (encV.writableLength > MAX_BACKLOG) { stats.droppedSlots++; continue; }
+        if (encV.writableLength > MAX_BACKLOG) {
+          stats.droppedSlots++;
+          // ffmpeg has stopped reading (a hung or failed encoder): restart it, the engine is unaffected
+          if (!stuckSince) stuckSince = now;
+          else if (now - stuckSince > 3000) { stuckSince = 0; log("ffmpeg is not reading, restarting it"); try { ffProc?.kill(); } catch {} }
+          continue;
+        }
+        stuckSince = 0;
         const live = engV && haveGame && latest && now - latestAt < GAME_STALL_MS;
         let frame;
         if (live) {
@@ -328,7 +345,7 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
       pumping = false;
     }
   }
-  let lastUsedAt = 0;
+  let lastUsedAt = 0, stuckSince = 0;
   const pumpTimer = setInterval(pump, 2);
 
   // --- the overlay ---
@@ -369,6 +386,7 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
     stats.ffmpegStarts++;
     const proc = spawn(FFMPEG_BIN, args, { stdio: ["ignore", "ignore", "pipe"] });
     ffProc = proc; stats.ffmpegPid = proc.pid;
+    raise(proc.pid);
     const started = Date.now();
     proc.stderr.on("data", (d) => {
       const s = redact(d.toString().trim());
@@ -385,12 +403,14 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
   }
   startFfmpeg();
 
+  const eld = monitorEventLoopDelay({ resolution: 5 }); eld.enable();
   const statTimer = env.COMPOSITE_STATS === "1" ? setInterval(() => log("stats", JSON.stringify(snapshot())), 10000) : null;
   function snapshot() {
     return {
       ...stats, ffmpegPid: ffProc?.pid ?? 0, chromePid: 0,
       blendMsAvg: stats.blendCount ? +(stats.blendMs / stats.blendCount).toFixed(2) : 0,
       overlay: ov ? ov.stats : null, phase,
+      loopDelayMs: { p50: +(eld.percentile(50) / 1e6).toFixed(1), p99: +(eld.percentile(99) / 1e6).toFixed(1), max: +(eld.max / 1e6).toFixed(1) },
     };
   }
 
