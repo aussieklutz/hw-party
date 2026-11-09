@@ -174,6 +174,7 @@ try {
     const cur = hints.filter((h) => h.target);
     if (cur.length) console.log(`   cursor hint positions (frame px): ${[0, .25, .5, .75, 1].map((f) => cur[Math.min(cur.length - 1, Math.floor(f * cur.length))]).map((h) => `(${h.x},${h.y})`).join(" ")}`);
   }
+  if (process.env.HOLD_MS) { log(`holding ${process.env.HOLD_MS} ms for audio statistics`); await sleep(Number(process.env.HOLD_MS)); }
   writeFileSync(join(OUT, "shots.json"), JSON.stringify(shots, null, 1));
 } catch (e) {
   check("hogview-real completed", false, e.message);

@@ -172,6 +172,39 @@ var videoSock, audioSock, hintSock: PTCPSocket;
     statRead, statMap, statSend: QWord;
     statStart: QWord;
 
+{$IFDEF WINDOWS}
+function LoadLibraryA(name: PChar): PtrUInt; stdcall; external 'kernel32.dll' name 'LoadLibraryA';
+function GetProcAddress(lib: PtrUInt; name: PChar): Pointer; stdcall; external 'kernel32.dll' name 'GetProcAddress';
+function GetCurrentProcess: PtrUInt; stdcall; external 'kernel32.dll' name 'GetCurrentProcess';
+function timeBeginPeriod(period: LongWord): LongWord; stdcall; external 'winmm.dll' name 'timeBeginPeriod';
+{$ENDIF}
+
+// The engine of a stream has a window nobody sees, and from Windows 11 a process like that has its timer
+// resolution request ignored: every wait rounds up to the 15.6 ms tick. The game loop waits with
+// SDL_Delay(1) between frames (so it ran at about 32 frames a second) and the dummy audio driver sleeps per
+// buffer (so only three quarters of the audio was ever produced). Ask for 1 ms and opt out of the throttling.
+procedure FastTimers;
+{$IFDEF WINDOWS}
+type TSetProcessInformation = function(proc: PtrUInt; infoClass: LongInt; info: Pointer; size: LongWord): LongInt; stdcall;
+var f: TSetProcessInformation;
+    state: array[0..2] of LongWord;
+{$ENDIF}
+begin
+{$IFDEF WINDOWS}
+    timeBeginPeriod(1);
+    f:= TSetProcessInformation(GetProcAddress(LoadLibraryA('kernel32.dll'), 'SetProcessInformation'));
+    if f <> nil then
+        begin
+        // PROCESS_POWER_THROTTLING_STATE: version 1, control IGNORE_TIMER_RESOLUTION (4), state 0 = not throttled
+        state[0]:= 1;
+        state[1]:= 4;
+        state[2]:= 0;
+        f(GetCurrentProcess, 4, @state, SizeOf(state))
+        end;
+    WriteLnToConsole('Timers: 1 ms resolution requested')
+{$ENDIF}
+end;
+
 function OpenSocket(port: LongInt): PTCPSocket;
 var ipaddr: TIPAddress;
     startTime: LongWord;
@@ -198,6 +231,7 @@ begin
     if connected then
         exit;
     connected:= true;
+    FastTimers;
 
     if cStreamAudioPort <> 0 then
         begin

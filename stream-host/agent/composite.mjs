@@ -34,6 +34,11 @@
 //   OVERLAY           0 turns the overlay off
 //   SLATE_COLOR       background of the slate, 0xRRGGBB (default 0d0b1e)
 //   AUDIO_KBPS        AAC bitrate (default 160)
+//   AUDIO_JITTER_MS   engine audio waits this long before it is let out (default 500): the engine delivers it in
+//                     bursts, and a shorter wait runs dry several times a second (choppy sound)
+//   VIDEO_DELAY_MS    the game picture is delayed by this much (default: AUDIO_JITTER_MS) so that it stays in sync
+//                     with that audio; the players' cutout is not delayed. 0 = no delay line
+//   AUDIO_SLACK_MS / AUDIO_REARM_MS  see the constants below
 //   AUDIO_LEAD_MS     the audio track runs this far ahead of the video in the muxer (default 50, 0 = in step)
 //   QSV_ASYNC_DEPTH, QSV_PRESET, QSV_LOW_POWER, QSV_SCENARIO, QSV_LOW_DELAY_BRC, QSV_EXTRA
 //                     Quick Sync tuning, see qsvArgs()
@@ -65,7 +70,10 @@ const FFMPEG_BIN = env.FFMPEG_BIN ?? "ffmpeg";
 const FRAME = (W * H * 3) / 2;
 const RATE = 44100;
 const GAME_STALL_MS = Number(env.GAME_STALL_MS ?? 1500);   // a silent engine this long falls back to the slate
-const AUDIO_JITTER_MS = Number(env.AUDIO_JITTER_MS ?? 50); // how much engine audio waits before it is let out
+const AUDIO_JITTER_MS = Number(env.AUDIO_JITTER_MS ?? 500); // how much engine audio waits before it is let out (the engine's audio arrives in bursts: measured gaps up to 450 ms)
+const AUDIO_SLACK_MS = Number(env.AUDIO_SLACK_MS ?? 300);   // beyond jitter + slack the oldest audio is dropped
+const AUDIO_REARM_MS = Number(env.AUDIO_REARM_MS ?? 150);   // after an underrun the audio comes back once this much has refilled
+const VIDEO_DELAY_MS = Number(env.VIDEO_DELAY_MS ?? AUDIO_JITTER_MS);   // the picture waits as long as the sound, to stay in sync
 const AUDIO_LEAD_MS = Number(env.AUDIO_LEAD_MS ?? 50);     // audio runs this far ahead of the video in the muxer (see below)
 const MAX_BACKLOG = FRAME * 4;                             // output bytes waiting before slots are dropped
 
@@ -222,9 +230,15 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
   const rxBufs = [Buffer.allocUnsafe(FRAME), Buffer.allocUnsafe(FRAME)];
   let engV = null, rx = rxBufs[0], rxFill = 0, latest = null;
   let latestAt = 0, haveGame = false;
+  // the delay line: the recent engine frames with their arrival times (the engine sends about 62 a second). A
+  // completed frame goes into the ring and the buffer it replaces becomes the next one to fill, so nothing is copied.
+  // seq counts the frames pushed, rd is the one being shown (-1: none is old enough yet)
+  const ringN = VIDEO_DELAY_MS > 0 ? Math.ceil((VIDEO_DELAY_MS * 66) / 1000) + 8 : 0;
+  const ring = Array.from({ length: ringN }, () => ({ buf: Buffer.allocUnsafe(FRAME), at: 0 }));
+  let seq = 0, rd = -1;
   const videoSrv = net.createServer((s) => {
     if (engV) engV.destroy();
-    engV = s; rxFill = 0; latest = null; haveGame = false; stats.games++;
+    engV = s; rxFill = 0; latest = null; haveGame = false; seq = 0; rd = -1; stats.games++;
     s.setNoDelay(true);
     log("engine video connected");
     s.on("data", (c) => {
@@ -234,8 +248,13 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
         c.copy(rx, rxFill, off, off + n);
         rxFill += n; off += n;
         if (rxFill === FRAME) {              // a whole frame: from here on it can be shown
-          latest = rx; rx = rx === rxBufs[0] ? rxBufs[1] : rxBufs[0];
-          rxFill = 0; latestAt = performance.now(); haveGame = true; stats.engineFrames++;
+          latestAt = performance.now();
+          if (ringN) {
+            const e = ring[seq % ringN], evicted = e.buf;
+            e.buf = rx; e.at = latestAt; seq++;
+            latest = rx; rx = evicted;
+          } else { latest = rx; rx = rx === rxBufs[0] ? rxBufs[1] : rxBufs[0]; }
+          rxFill = 0; haveGame = true; stats.engineFrames++;
           pump();
         }
       }
@@ -247,10 +266,10 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
     s.on("error", gone);
   });
 
-  const fifo = []; let fifoBytes = 0, engA = null, audioArmed = false, lastAudioAt = 0;
+  const fifo = []; let fifoBytes = 0, engA = null, audioArmed = false, audioPrimed = false, lastAudioAt = 0;
   const audioSrv = net.createServer((s) => {
     if (engA) engA.destroy();
-    engA = s; fifo.length = 0; fifoBytes = 0; audioArmed = false; lastAudioAt = 0;
+    engA = s; fifo.length = 0; fifoBytes = 0; audioArmed = false; audioPrimed = false; lastAudioAt = 0;
     log("engine audio connected");
     s.on("data", (c) => {
       const tn = performance.now();
@@ -258,9 +277,9 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
       lastAudioAt = tn;
       stats.engineAudioBytes += c.length; stats.engineAudioChunks++;
       fifo.push(c); fifoBytes += c.length;
-      // beyond the jitter buffer + 80 ms the oldest audio is dropped: after an engine stall the burst that follows would
+      // beyond the jitter buffer + the slack the oldest audio is dropped: after an engine stall the burst that follows would
       // otherwise leave the sound permanently late against the picture
-      const maxBytes = (RATE * 4 * (AUDIO_JITTER_MS + 80)) / 1000;
+      const maxBytes = (RATE * 4 * (AUDIO_JITTER_MS + AUDIO_SLACK_MS)) / 1000;
       while (fifoBytes > maxBytes && fifo.length > 1) { fifoBytes -= fifo.shift().length; stats.audioTrimmed++; }
     });
     const gone = () => { if (engA === s) { engA = null; log("engine audio gone"); } };
@@ -296,8 +315,9 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
     const need = samples * 4, out = Buffer.alloc(need);       // zeros: silence
     if (!engA && !fifoBytes) { audioArmed = false; return out; }
     if (!audioArmed) {
-      if (fifoBytes < (RATE * 4 * AUDIO_JITTER_MS) / 1000) return out;   // still filling: silence
-      audioArmed = true;
+      // the first time the full wait; after an underrun only a short refill, so one late burst costs a blip, not half a second
+      if (fifoBytes < (RATE * 4 * (audioPrimed ? AUDIO_REARM_MS : AUDIO_JITTER_MS)) / 1000) return out;   // still filling: silence
+      audioArmed = true; audioPrimed = true;
     }
     let got = 0;
     while (got < need && fifo.length) {
@@ -351,12 +371,23 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
           continue;
         }
         stuckSince = 0;
-        const live = engV && haveGame && latest && now - latestAt < GAME_STALL_MS;
+        // which engine frame is due: the newest one that is VIDEO_DELAY_MS old (or the latest, with no delay line)
+        let src = null, srcAt = 0;
+        if (ringN) {
+          const target = now - VIDEO_DELAY_MS;
+          if (rd < seq - ringN) rd = seq - ringN;                      // what was shown has been overwritten: skip ahead
+          while (rd + 1 < seq && ring[(rd + 1) % ringN].at <= target) rd++;
+          if (rd >= 0 && rd >= seq - ringN) {
+            const e = ring[rd % ringN];
+            // queued frames play out even when the engine has just gone; a silent engine falls back to the slate
+            if (rd < seq - 1 || (engV && now - e.at < GAME_STALL_MS + VIDEO_DELAY_MS)) { src = e.buf; srcAt = e.at; }
+          }
+        } else if (engV && haveGame && latest && now - latestAt < GAME_STALL_MS) { src = latest; srcAt = latestAt; }
         let frame;
-        if (live) {
+        if (src) {
           const out = poolFree.pop();
           if (!out) { stats.droppedSlots++; continue; }
-          latest.copy(out);
+          src.copy(out);
           if (layers.game) {
             const b0 = performance.now();
             blendLayer(out, W, H, layers.game);
@@ -365,8 +396,8 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
           }
           frame = out;
           stats.gameSlots++;
-          if (latestAt <= lastUsedAt) stats.dupSlots++; else stats.engineFramesUsed++;
-          lastUsedAt = latestAt;
+          if (srcAt <= lastUsedAt) stats.dupSlots++; else stats.engineFramesUsed++;
+          lastUsedAt = srcAt;
           if (phase !== "game") setPhase("game");
           encV.write(out, () => poolFree.push(out));
         } else {
