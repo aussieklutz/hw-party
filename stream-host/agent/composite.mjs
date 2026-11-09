@@ -28,7 +28,8 @@
 //   FEED_URL          push target. Or set TWITCH_KEY (and TWITCH_INGEST, default the
 //                     Sydney ingest) and the URL is rtmp://<ingest>/app/<key>. The key is
 //                     never logged.
-//   OVERLAY_GAME_URL  page drawn over the game (default <WORKER_URL>/stream/scoreboard.html)
+//   OVERLAY_GAME_URL  page drawn over the game (default none: game frames go out exactly as the engine drew them,
+//                     and the slate shows through whenever there are none)
 //   OVERLAY_SLATE_URL page drawn over the slate (default <WORKER_URL>/stream/, the slide show)
 //   OVERLAY           0 turns the overlay off
 //   SLATE_COLOR       background of the slate, 0xRRGGBB (default 0d0b1e)
@@ -373,13 +374,15 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
 
   // --- the overlay ---
   const base = (env.WORKER_URL ?? "").replace(/\/$/, "");
-  const urlGame = overlayGameUrl ?? env.OVERLAY_GAME_URL ?? `${base}/stream/scoreboard.html`;
+  const urlGame = overlayGameUrl ?? env.OVERLAY_GAME_URL ?? null;
   const urlSlate = overlaySlateUrl ?? env.OVERLAY_SLATE_URL ?? `${base}/stream/`;
   let ov = null;
-  const overlayOn = env.OVERLAY !== "0" && (overlayGameUrl || env.OVERLAY_GAME_URL || base);
+  const overlayOn = env.OVERLAY !== "0" && (overlayGameUrl || env.OVERLAY_GAME_URL || overlaySlateUrl || env.OVERLAY_SLATE_URL || base);
   function setPhase(p) {
     phase = p;
-    if (!ov || urlGame === urlSlate) return;   // one page for both: nothing to switch
+    if (!ov) return;
+    if (!urlGame) { ov.setPaused(p === "game"); return; }   // game frames are shown bare: the slate page rests meanwhile
+    if (urlGame === urlSlate) return;          // one page for both: nothing to switch
     layers[p] = null;                          // show nothing until the other page has been drawn
     if (p === "slate") rebuildSlate();
     ov.setUrl(p === "game" ? urlGame : urlSlate);
@@ -389,7 +392,7 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
       ov = await startOverlay({
         url: urlSlate, width: W, height: H, log,
         onLayer: (layer) => {
-          if (urlGame === urlSlate) layers.slate = layers.game = layer; else layers[phase] = layer;
+          if (urlGame === urlSlate) layers.slate = layers.game = layer; else if (!urlGame) layers.slate = layer; else layers[phase] = layer;
           if (layers.slate === layer) rebuildSlate();
         },
       });

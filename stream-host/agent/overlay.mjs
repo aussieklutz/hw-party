@@ -163,10 +163,11 @@ export async function startOverlay({ url, width, height, onLayer, log = () => {}
   }
 
   const interval = Number(process.env.OVERLAY_MS ?? 1000);
+  let paused = false;   // no captures while the slate is not on screen
   const loop = (async () => {
     while (!gone) {
       const t0 = Date.now();
-      try { await capture(); } catch (e) { if (!gone) log("overlay capture failed:", e.message); }
+      try { if (!paused) await capture(); } catch (e) { if (!gone) log("overlay capture failed:", e.message); }
       await sleep(Math.max(50, interval - (Date.now() - t0)));
     }
   })();
@@ -188,6 +189,7 @@ export async function startOverlay({ url, width, height, onLayer, log = () => {}
   await setUrl(url);
   return {
     setUrl, stats,
+    setPaused(p) { paused = p; },
     async stop() { gone = true; try { ws.close(); } catch {} kill(); worker.terminate(); await loop.catch(() => {}); },
   };
 }

@@ -22,8 +22,8 @@ OBS: add a Media Source with the input
 
 Straight to Twitch, without OBS (FEED_MODE=composite)
 ----------------------------------------------------
-One ffmpeg lives for the whole session. It composes the game, a slate between games and the
-scoreboard page, encodes once with Quick Sync and streams straight to Twitch. The stream does not
+One ffmpeg lives for the whole session. It composes the game and, whenever there is no game, the
+slide show, encodes once with Quick Sync and streams straight to Twitch. The stream does not
 drop between games, and there is no second encode and no OBS buffer in the way.
 
 What you set by hand:
@@ -36,11 +36,11 @@ What you set by hand:
   2. Twitch dashboard > Settings > Stream > "Latency mode": choose "Low latency". Without it viewers
      see 8-15 s of delay however fast the feed leaves your PC (low latency is reported to be about 2-5 s).
   3. Close OBS (or at least its Twitch stream): only one thing may stream to the channel at a time.
-  4. Chrome or Edge must be installed (Edge is on every Windows 11): it draws the scoreboard overlay.
+  4. Chrome or Edge must be installed (Edge is on every Windows 11): it draws the slide show.
   5. run.ps1 / launch.bat as usual. It checks Quick Sync and falls back to software if it is missing.
-  Optional (.env): OVERLAY_GAME_URL / OVERLAY_SLATE_URL (any worker /stream/ page; the slate between games
-  is the /stream/ slide show by default, point OVERLAY_SLATE_URL at scoreboard.html for the bare
-  scoreboard), SLATE_COLOR, OVERLAY=0, VIDEO_KBPS.
+  Optional (.env): OVERLAY_SLATE_URL (any worker /stream/ page: the slate shown whenever there is no game, the
+  /stream/ slide show by default), OVERLAY_GAME_URL (a page drawn over the game, off by default,
+  for example <WORKER_URL>/stream/scoreboard.html), SLATE_COLOR, OVERLAY=0, VIDEO_KBPS.
 
 What you give up compared with OBS: scene editing (the layout is the one page per phase, set in .env),
 a webcam or any other source, alerts and chat overlays, and OBS's own preview. If you want those,
