@@ -52,6 +52,10 @@
         #cpad { grid-template-columns: repeat(4, 56px); gap: 3px; }
       }
       body.ingame #status { display: none; }
+      #hogview { display: flex; justify-content: center; margin: 0.3rem 0; }
+      #hogview[hidden] { display: none; }
+      #hogcanvas { width: min(100%, 540px); aspect-ratio: 320 / 216; background: #0d0b1e; border: 1px solid var(--hw-border); border-radius: 10px; image-rendering: auto; }
+      @media (orientation: landscape) { #hogview { position: fixed; right: 8px; top: 8px; z-index: 5; pointer-events: none; opacity: 0.9; } #hogcanvas { width: 34vw; } }
       #weaponsBtn { font-size: 1.2rem; }
       #weaponspanel { position: fixed; inset: 0; background: rgba(16,16,34,0.97); display: none; flex-direction: column; padding: 8px; z-index: 10; }
       #weaponspanel.open { display: flex; }
@@ -117,6 +121,7 @@
       <p id="rolenote" hidden style="margin:0.3rem 0;padding:6px 12px;border-radius:8px;background:#4a1020;color:#ffd7de;font-weight:bold"></p>
 
       <div id="controls" hidden>
+        <div id="hogview" hidden><canvas id="hogcanvas"></canvas></div>
         <div class="padgroup" id="pgroup-pointer">
           <div class="padlabel">Pointer</div>
           <div id="cpad">
@@ -136,6 +141,9 @@
         </div>
         <div class="hrow">
           <button id="fire">Fire (hold)</button><button id="weaponsBtn" disabled>Weapons</button>
+        </div>
+        <div class="hrow">
+          <button id="viewBtn" type="button">Close-up: on</button>
         </div>
       </div>
     </div>
@@ -401,7 +409,9 @@
           setTimeout(connect, backoff);
           backoff = Math.min(backoff * 2, 5000);
         };
+        ws.binaryType = "arraybuffer";
         ws.onmessage = (e) => {
+          if (typeof e.data !== "string") { drawHogView(e.data); return; }   // the host's close-up of the active hog
           const msg = JSON.parse(e.data);
           if (msg.type === "hello") {
             if (msg.sid) mySid = msg.sid;
@@ -453,6 +463,8 @@
               : (myTeam && msg.team === myTeam);
             activeEl.textContent = mine ? "YOUR TURN" : `turn: ${msg.team}`;
             setControlsEnabled(!!mine);
+            hogViewMine = !!mine;
+            if (!mine) hideHogView();
             // heartbeat: the host pauses the game and counts down when a
             // sleeping phone stops pinging (buglist: player AFK countdown)
             clearInterval(pingTimer);
@@ -547,6 +559,32 @@
           if (st.mode) { myMode = st.mode; applyMode(); }
         } catch {}
       }
+
+      // the close-up: small JPEG frames the host sends only to the player whose turn it is
+      const hogViewEl = document.getElementById("hogview");
+      const hogCanvas = document.getElementById("hogcanvas");
+      const viewBtn = document.getElementById("viewBtn");
+      let hogViewMine = false, hogViewOn = localStorage.getItem("hogview") !== "off", hogSeq = 0;
+      const syncViewBtn = () => { viewBtn.textContent = hogViewOn ? "Close-up: on" : "Close-up: off"; };
+      function hideHogView() { hogViewEl.hidden = true; hogSeq++; }
+      async function drawHogView(data) {
+        if (!hogViewOn || !hogViewMine) return;
+        const seq = ++hogSeq;
+        let bmp;
+        try { bmp = await createImageBitmap(new Blob([data], { type: "image/jpeg" })); } catch { return; }
+        if (seq !== hogSeq) { bmp.close(); return; }   // a newer frame is already on its way: draw only the latest
+        if (hogCanvas.width !== bmp.width) { hogCanvas.width = bmp.width; hogCanvas.height = bmp.height; }
+        hogCanvas.getContext("2d").drawImage(bmp, 0, 0);
+        bmp.close();
+        hogViewEl.hidden = false;
+      }
+      viewBtn.onclick = () => {
+        hogViewOn = !hogViewOn;
+        localStorage.setItem("hogview", hogViewOn ? "on" : "off");
+        syncViewBtn();
+        if (!hogViewOn) hideHogView();
+      };
+      syncViewBtn();
 
       function setControlsEnabled(enabled) {
         padBtns.forEach((b) => (b.disabled = !enabled));

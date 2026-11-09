@@ -442,6 +442,8 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
 
   return {
     stats: snapshot,
+    // the newest complete engine frame (NV12, valid until the next one is received) for the hog close-up
+    latestFrame: () => (engV && haveGame && latest ? { buf: latest, at: latestAt } : null),
     get ffmpegPid() { return ffProc?.pid ?? 0; },
     async stop() {
       stopping = true;

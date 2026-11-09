@@ -28,6 +28,7 @@ import { videoInit, videoSetPhase, videoEngineArgs } from "./video.mjs";
 import { setFeedPhase } from "./feed.mjs";
 import { tapStart } from "./tap.mjs";
 import { compositeEnabled, compositeStart } from "./composite.mjs";
+import { startHogView } from "./hogview.mjs";
 import { Lobby } from "./layout.mjs";
 import { frame, xyFrame } from "./frames.mjs";
 
@@ -1079,7 +1080,18 @@ async function main() {
     // one encoder for the whole session: the engine connects to the agent's ports for every game
     if (process.env.STREAM_TAP !== "1") { console.error("FEED_MODE=composite needs STREAM_TAP=1"); process.exit(2); }
     const comp = await compositeStart();
-    const bye = () => comp.stop().finally(() => process.exit(0));
+    // a close-up of the active hog for the active player's phone only (HOG_VIEW=0 turns it off)
+    const hogView = process.env.HOG_VIEW === "0" ? null : startHogView({
+      ffmpeg: process.env.FFMPEG_BIN ?? "ffmpeg",
+      frameW: Number(process.env.STREAM_WIDTH ?? 1920), frameH: Number(process.env.STREAM_HEIGHT ?? 1080),
+      getFrame: comp.latestFrame, getTarget: () => activeSid, log,
+      onJpeg(sid, jpeg) {
+        if (!ws || ws.readyState !== 1 || ws.bufferedAmount > 256 * 1024) return;
+        const id = Buffer.from(sid);
+        ws.send(Buffer.concat([Buffer.from([id.length]), id, jpeg]));
+      },
+    });
+    const bye = () => { hogView?.stop(); comp.stop().finally(() => process.exit(0)); };
     process.on("SIGINT", bye);
     process.on("SIGTERM", bye);
   }

@@ -36,6 +36,7 @@ function capForRoom(config: { mode: PartyMode; slots?: number; maxPlayers?: numb
 
 const MAX_TEAM_NAME = 40;
 const MAX_INPUT = 256;
+const VIEW_MAX = 96 * 1024; // one close-up frame (a small JPEG), host -> the active player
 
 const INPUT_RE = /^(\+[a-z]+|\-[a-z]+|(?:p|P)\s+-?\d+\s+-?\d+|[1-5]|[jJstZz]|slot\s+\d+|setweap\s+[\x01-\x7e])$/;
 const TEXT_RE = /^[\x20-\x7e]{0,100}$/;
@@ -66,6 +67,21 @@ export class RoomDO extends DurableObject {
       this.lastState = (await this.ctx.storage.get<string>("lastState")) ?? null;
     if (this.lastTurn === null)
       this.lastTurn = (await this.ctx.storage.get<{ team: string; sid?: string }>("lastTurn")) ?? null;
+  }
+
+  private async relayView(data: ArrayBuffer): Promise<void> {
+    if (data.byteLength < 8 || data.byteLength > VIEW_MAX) return;
+    const bytes = new Uint8Array(data);
+    const n = bytes[0];
+    if (n === 0 || 1 + n >= bytes.length) return;
+    const sid = new TextDecoder().decode(bytes.subarray(1, 1 + n));
+    await this.replayVolatile();
+    if (!this.lastTurn?.sid || this.lastTurn.sid !== sid) return;
+    const jpeg = data.slice(1 + n);
+    for (const cws of this.ctx.getWebSockets()) {
+      const cmeta = cws.deserializeAttachment() as WsMeta;
+      if (cmeta.role === "controller" && cmeta.sid === sid) cws.send(jpeg);
+    }
   }
 
   private async roster(): Promise<Record<string, RoomRosterEntry>> {
@@ -256,7 +272,13 @@ export class RoomDO extends DurableObject {
   }
 
   override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    if (typeof message !== "string") return;
+    if (typeof message !== "string") {
+      // the host's close-up of the active hog: [sid length][sid][jpeg], relayed to that one player's phone
+      // and only while it is their turn
+      const host = ws.deserializeAttachment() as WsMeta;
+      if (host.role === "host") await this.relayView(message);
+      return;
+    }
     if (message.length > MAX_INPUT * 4) return;
     const meta = ws.deserializeAttachment() as WsMeta;
     if (meta.role !== "host" && !this.allow(meta.sid)) return;
