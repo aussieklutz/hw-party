@@ -71,7 +71,7 @@ export async function startOverlay({ url, width, height, onLayer, log = () => {}
   process.on("exit", kill);
 
   // the port Chrome picked is written to DevToolsActivePort
-  let port = 0;
+  let port = Number(process.env.OVERLAY_CDP_PORT ?? 0);   // a fixed port is used as given
   for (let i = 0; i < 120 && !port; i++) {
     try { port = Number(readFileSync(join(dir, "DevToolsActivePort"), "utf8").split("\n")[0]); } catch {}
     if (!port) await sleep(250);
