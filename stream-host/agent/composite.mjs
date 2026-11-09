@@ -32,6 +32,7 @@
 //   OVERLAY           0 turns the overlay off
 //   SLATE_COLOR       background of the slate, 0xRRGGBB (default 0d0b1e)
 //   AUDIO_KBPS        AAC bitrate (default 160)
+//   AUDIO_LEAD_MS     the audio track runs this far ahead of the video in the muxer (default 60, 0 = in step)
 //   QSV_ASYNC_DEPTH, QSV_PRESET, QSV_LOW_POWER, QSV_SCENARIO, QSV_LOW_DELAY_BRC, QSV_EXTRA
 //                     Quick Sync tuning, see qsvArgs()
 //   FEED_PRIORITY     high (default) | normal: the agent and its ffmpeg run at high process priority. The frame
@@ -61,6 +62,7 @@ const FRAME = (W * H * 3) / 2;
 const RATE = 44100;
 const GAME_STALL_MS = Number(env.GAME_STALL_MS ?? 1500);   // a silent engine this long falls back to the slate
 const AUDIO_JITTER_MS = Number(env.AUDIO_JITTER_MS ?? 40); // how much engine audio waits before it is let out
+const AUDIO_LEAD_MS = Number(env.AUDIO_LEAD_MS ?? 60);     // audio runs this far ahead of the video in the muxer (see below)
 const MAX_BACKLOG = FRAME * 4;                             // output bytes waiting before slots are dropped
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), "[composite]", ...a);
@@ -344,7 +346,11 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
         vFrames++;
       }
       if (encA) {
-        const want = Math.floor((vFrames * RATE) / FPS) - aSamples;
+        // The flv muxer holds a video packet until an audio packet with a later timestamp has arrived, and an AAC
+        // packet is 1024 samples: audio written exactly in step with the video holds every frame back by
+        // 25-100 ms (measured). So the audio track runs AUDIO_LEAD_MS ahead: it starts with that much silence and the
+        // engine audio then plays that much late against the picture (60 ms is within what viewers cannot notice).
+        const want = Math.floor((vFrames * RATE) / FPS) + Math.round((AUDIO_LEAD_MS * RATE) / 1000) - aSamples;
         if (want > 0) { encA.write(audioChunk(want)); aSamples += want; }
       }
     } finally {
