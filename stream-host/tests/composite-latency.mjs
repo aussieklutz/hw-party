@@ -12,6 +12,7 @@
 //      lock; default on for qsv), OVERLAY=0 (composite: no overlay), QSV_* (see composite.mjs),
 //      LABEL (name in the output), TEST_PORT (19350), TEST_TAP (19101), HW_STAGE, OVERLAY_URL
 import { spawn } from "node:child_process";
+import os from "node:os";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { startMediamtx, sleep, tools, withGpuLock, cpuSeconds, pidsByCommandLine, gpuSample } from "./composite-lib.mjs";
@@ -67,8 +68,9 @@ async function run() {
     const rstat = { n: 0, min: 255, max: 0 };
     const startReader = () => {
       reader = spawn(tools().ffmpeg, ["-hide_banner", "-loglevel", "error", "-nostdin", "-fflags", "nobuffer", "-flags", "low_delay",
-        "-probesize", "1000000", "-analyzeduration", "1500000", "-i", url, "-an", "-vf", "scale=32:18:flags=neighbor,format=gray", "-f", "rawvideo", "pipe:1"],
+        "-probesize", "1000000", "-analyzeduration", "1500000", "-i", url, "-an", "-vf", "scale=32:18:flags=neighbor,format=gray", "-fps_mode", "passthrough", "-f", "rawvideo", "pipe:1"],
       { stdio: ["ignore", "pipe", "inherit"] });
+      try { os.setPriority(reader.pid, os.constants.priority.PRIORITY_HIGH); } catch {}
       reader.stdout.on("data", (d) => {
         rbuf = Buffer.concat([rbuf, d]);
         while (rbuf.length >= FR) {
