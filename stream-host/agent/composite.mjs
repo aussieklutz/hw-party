@@ -156,19 +156,25 @@ export function videoArgs(encoder) {
 }
 
 export function ffmpegArgs(encoder, audioPort, videoPort, out = FEED) {
+  // experiment switches (see the findings): FEED_DEBUG_NOAUDIO=1 leaves the audio out, FEED_DEBUG_WALLCLOCK=1 stamps
+  // the video with the arrival time instead of the frame count
+  const noAudio = env.FEED_DEBUG_NOAUDIO === "1";
   return [
     "-hide_banner", "-loglevel", env.FFMPEG_LOGLEVEL ?? "warning", "-nostdin",
     ...(env.TAP_STATS === "1" ? ["-stats", "-stats_period", "5"] : []),
     // raw video and audio from the agent, which writes exactly FPS frames and RATE samples a second,
     // so the timestamps are the counts; video first: the agent starts its clock when that connects
     "-probesize", String(FRAME), "-analyzeduration", "0", "-fflags", "+nobuffer",
+    ...(env.FEED_DEBUG_WALLCLOCK === "1" ? ["-use_wallclock_as_timestamps", "1"] : []),
     "-f", "rawvideo", "-pix_fmt", "nv12", "-video_size", `${W}x${H}`, "-framerate", String(FPS), "-i", `tcp://127.0.0.1:${videoPort}`,
-    "-probesize", "4096", "-analyzeduration", "0", "-fflags", "+nobuffer",
-    "-f", "s16le", "-ar", String(RATE), "-ac", "2", "-i", `tcp://127.0.0.1:${audioPort}`,
-    "-map", "0:v", "-map", "1:a",
+    ...(noAudio ? [] : [
+      "-probesize", "4096", "-analyzeduration", "0", "-fflags", "+nobuffer",
+      "-f", "s16le", "-ar", String(RATE), "-ac", "2", "-i", `tcp://127.0.0.1:${audioPort}`,
+    ]),
+    "-map", "0:v", ...(noAudio ? [] : ["-map", "1:a"]),
     ...videoArgs(encoder),
     "-fps_mode", "passthrough",
-    "-c:a", "aac", "-b:a", `${AUDIO_KBPS}k`, "-ar", String(RATE),
+    ...(noAudio ? ["-an"] : ["-c:a", "aac", "-b:a", `${AUDIO_KBPS}k`, "-ar", String(RATE)]),
     "-flush_packets", "1", "-muxdelay", "0", "-muxpreload", "0",
     "-f", "flv", ...(/^rtmps?:/.test(out) ? ["-rtmp_live", "live", "-rtmp_buffer", "0"] : []), out,
   ];
