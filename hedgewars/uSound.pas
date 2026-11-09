@@ -405,7 +405,12 @@ begin
         begin
         WriteLnToConsole(msgOK);
         WriteToConsole('Open audio...');
-        success:= Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, channels, 1024) = 0;
+        // a stream has no sound card to pace the mixer: the dummy driver sleeps once per buffer, and whatever
+        // the sleep gets wrong (up to a few ms) is a tenth of a 1024 sample buffer but only about 1% of a big one
+        if cStreamAudioPort <> 0 then
+            success:= Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, channels, 4096) = 0
+        else
+            success:= Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, channels, 1024) = 0;
         end;
 
     if success then
