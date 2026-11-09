@@ -19,8 +19,9 @@
 //   switch between slate and game always falls on a frame boundary), or the slate.
 // * The overlay (a worker /stream/ page, rendered about once a second by overlay.mjs)
 //   is blended in by the agent: a small box per frame on game frames, once a second
-//   into the cached slate frame. ffmpeg's own overlay filter was measured and is
-//   slower and adds up to a second of delay (stream-host/experiments/ffmpeg-composite.md).
+//   into the cached slate frame. ffmpeg's own overlay filter was measured: it costs
+//   0.3-0.5 core more than this and, fed a 1 fps overlay, holds frames back until the
+//   next overlay frame arrives (stream-host/experiments/ffmpeg-composite.md).
 //
 // env (besides the ones tap.mjs documents):
 //   FEED_MODE         composite switches this on (default: one ffmpeg per game, tap.mjs)
