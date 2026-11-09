@@ -19,6 +19,7 @@
 //   TAP_FORMAT        nv12 | bgra: what the engine sends (default nv12: the graphics
 //                     card converts, a third of the data, nothing left to flip)
 //   TAP_FILTER        gpu | sw: where qsv converts and flips bgra frames (default gpu)
+//   STREAM_ZOOM     engine zoom in percent (default 150, range 50-175; 100 is the engine's own default)
 //   TAP_VIDEO_PORT/TAP_AUDIO_PORT  local ports (default 19001/19002); TAP_HINT_PORT 19003 (composite hog close-up)
 //   TAP_STATS         1 logs ffmpeg's own progress (frame rate, duplicated and dropped frames)
 //   FFMPEG_BIN        default ffmpeg
@@ -116,6 +117,8 @@ function engineSide() {
       // composite mode with the hog close-up: the engine also reports where the active hog and its target are
       ...(process.env.FEED_MODE === "composite" && process.env.HOG_VIEW !== "0" && process.env.HOG_VIEW_HINT !== "0"
         ? ["--stream-hint-port", String(HINT_PORT)] : []),
+      // the engine's zoom, in percent of its normal 100 (up to 175): the stream is wider than a player's window
+      "--zoom", String(process.env.STREAM_ZOOM ?? 150),
       "--hidden", "--nodampen",
       "--width", String(W), "--height", String(H),
       "--frame-interval", String(Math.max(1, Math.floor(1000 / FPS))),

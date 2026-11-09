@@ -257,7 +257,12 @@ end;
 
 procedure InitCameraBorders;
 begin
-cGearScrEdgesDist:= min(2 * cScreenHeight div 5, 2 * cScreenWidth div 5);
+if cStreamVideoPort <> 0 then
+    // a stream has no player to move the view: keep the followed hedgehog (the active one) in the
+    // middle of the frame instead of letting it wander towards the edge before the camera moves
+    cGearScrEdgesDist:= cScreenHeight div 2
+else
+    cGearScrEdgesDist:= min(2 * cScreenHeight div 5, 2 * cScreenWidth div 5);
 end;
 
 procedure InitTouchInterface;
