@@ -29,7 +29,7 @@
 //                     Sydney ingest) and the URL is rtmp://<ingest>/app/<key>. The key is
 //                     never logged.
 //   OVERLAY_GAME_URL  page drawn over the game (default <WORKER_URL>/stream/scoreboard.html)
-//   OVERLAY_SLATE_URL page drawn over the slate (default the same)
+//   OVERLAY_SLATE_URL page drawn over the slate (default <WORKER_URL>/stream/, the slide show)
 //   OVERLAY           0 turns the overlay off
 //   SLATE_COLOR       background of the slate, 0xRRGGBB (default 0d0b1e)
 //   AUDIO_KBPS        AAC bitrate (default 160)
@@ -72,7 +72,8 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), "[comp
 export function feedUrl() {
   if (env.FEED_URL) return env.FEED_URL;
   if (env.TWITCH_KEY) {
-    return `rtmp://${env.TWITCH_INGEST ?? "aps20.contribute.live-video.net"}/app/${env.TWITCH_KEY}`;
+    // TWITCH_TEST=1: Twitch's bandwidth test, the stream is checked but never goes live
+    return `rtmp://${env.TWITCH_INGEST ?? "aps20.contribute.live-video.net"}/app/${env.TWITCH_KEY}${env.TWITCH_TEST === "1" ? "?bandwidthtest=true" : ""}`;
   }
   return "rtmp://127.0.0.1:1935/live/game";
 }
@@ -373,7 +374,7 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
   // --- the overlay ---
   const base = (env.WORKER_URL ?? "").replace(/\/$/, "");
   const urlGame = overlayGameUrl ?? env.OVERLAY_GAME_URL ?? `${base}/stream/scoreboard.html`;
-  const urlSlate = overlaySlateUrl ?? env.OVERLAY_SLATE_URL ?? urlGame;
+  const urlSlate = overlaySlateUrl ?? env.OVERLAY_SLATE_URL ?? `${base}/stream/`;
   let ov = null;
   const overlayOn = env.OVERLAY !== "0" && (overlayGameUrl || env.OVERLAY_GAME_URL || base);
   function setPhase(p) {

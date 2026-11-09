@@ -68,6 +68,7 @@ if ($composite) {
         if (-not $env:TWITCH_KEY) { throw "FEED_MODE=composite needs TWITCH_KEY (or FEED_URL) in $envFile" }
         if (-not $env:TWITCH_INGEST) { $env:TWITCH_INGEST = "aps20.contribute.live-video.net" } # Sydney
         $env:FEED_URL = "rtmp://$($env:TWITCH_INGEST)/app/$($env:TWITCH_KEY)"
+        if ($env:TWITCH_TEST -eq "1") { $env:FEED_URL += "?bandwidthtest=true" } # a test stream: checked by Twitch, never live
     }
     $mediamtx = $null   # nothing to serve locally unless FEED_URL points at it
     if ($env:FEED_URL -match '^rtmp://(127\.0\.0\.1|localhost)') { $mediamtx = Find-First @("$root\mediamtx\mediamtx.exe") }

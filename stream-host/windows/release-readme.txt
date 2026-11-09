@@ -38,8 +38,9 @@ What you set by hand:
   3. Close OBS (or at least its Twitch stream): only one thing may stream to the channel at a time.
   4. Chrome or Edge must be installed (Edge is on every Windows 11): it draws the scoreboard overlay.
   5. run.ps1 / launch.bat as usual. It checks Quick Sync and falls back to software if it is missing.
-  Optional (.env): OVERLAY_GAME_URL / OVERLAY_SLATE_URL (any worker /stream/ page, for example
-  <WORKER_URL>/stream/ for the slate slides while no game runs), SLATE_COLOR, OVERLAY=0, VIDEO_KBPS.
+  Optional (.env): OVERLAY_GAME_URL / OVERLAY_SLATE_URL (any worker /stream/ page; the slate between games
+  is the /stream/ slide show by default, point OVERLAY_SLATE_URL at scoreboard.html for the bare
+  scoreboard), SLATE_COLOR, OVERLAY=0, VIDEO_KBPS.
 
 What you give up compared with OBS: scene editing (the layout is the one page per phase, set in .env),
 a webcam or any other source, alerts and chat overlays, and OBS's own preview. If you want those,
