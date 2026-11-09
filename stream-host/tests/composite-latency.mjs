@@ -116,13 +116,15 @@ async function run() {
     if (MODE === "composite") { const n = hostLines.length; host.stdin.write("stats\n"); fwd = JSON.parse((await waitLine("STATS", n)).slice(6)); }
 
     // pair flashes and arrivals
-    const lat = [];
     const joined = trace.length ? trace[0][0] + 2000 : Infinity;   // the reader needs a moment to join
-    for (const f of flashes.filter((x) => x > joined)) {
-      const a = arrivals.find((t) => t > f && t - f < 5000);
-      if (a) lat.push(a - f);
+    // the three white frames of a flash arrive as a cluster: the first of each cluster, minus the latest flash write before it
+    const clusters = arrivals.filter((t, i) => i === 0 || t - arrivals[i - 1] > 300);
+    const used = new Set(), lat = [];
+    for (const c of clusters) {
+      const f = [...flashes].reverse().find((x) => x < c);
+      if (f && !used.has(f) && f > joined) { used.add(f); lat.push(c - f); }
     }
-    const nearest = flashes.filter((x) => x > joined).slice(0, 6).map((f) => { const d = arrivals.map((t) => t - f).filter((x) => x > -3000); return d.length ? Math.round(Math.min(...d.filter((x) => x > 0), 99999)) : null; });
+    const nearest = lat.slice(0, 8).map(Math.round);
     lat.sort((x, y) => x - y);
     const q = (p) => (lat.length ? Math.round(lat[Math.min(lat.length - 1, Math.floor(p * lat.length))]) : null);
     const result = {
