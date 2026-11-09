@@ -32,7 +32,7 @@
 //   OVERLAY           0 turns the overlay off
 //   SLATE_COLOR       background of the slate, 0xRRGGBB (default 0d0b1e)
 //   AUDIO_KBPS        AAC bitrate (default 160)
-//   AUDIO_LEAD_MS     the audio track runs this far ahead of the video in the muxer (default 60, 0 = in step)
+//   AUDIO_LEAD_MS     the audio track runs this far ahead of the video in the muxer (default 50, 0 = in step)
 //   QSV_ASYNC_DEPTH, QSV_PRESET, QSV_LOW_POWER, QSV_SCENARIO, QSV_LOW_DELAY_BRC, QSV_EXTRA
 //                     Quick Sync tuning, see qsvArgs()
 //   FEED_PRIORITY     high (default) | normal: the agent and its ffmpeg run at high process priority. The frame
@@ -61,8 +61,8 @@ const FFMPEG_BIN = env.FFMPEG_BIN ?? "ffmpeg";
 const FRAME = (W * H * 3) / 2;
 const RATE = 44100;
 const GAME_STALL_MS = Number(env.GAME_STALL_MS ?? 1500);   // a silent engine this long falls back to the slate
-const AUDIO_JITTER_MS = Number(env.AUDIO_JITTER_MS ?? 40); // how much engine audio waits before it is let out
-const AUDIO_LEAD_MS = Number(env.AUDIO_LEAD_MS ?? 60);     // audio runs this far ahead of the video in the muxer (see below)
+const AUDIO_JITTER_MS = Number(env.AUDIO_JITTER_MS ?? 50); // how much engine audio waits before it is let out
+const AUDIO_LEAD_MS = Number(env.AUDIO_LEAD_MS ?? 50);     // audio runs this far ahead of the video in the muxer (see below)
 const MAX_BACKLOG = FRAME * 4;                             // output bytes waiting before slots are dropped
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), "[composite]", ...a);
@@ -196,7 +196,7 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
   const encoder = pickEncoder();
   const stats = {
     encoder, ffmpegStarts: 0, slots: 0, gameSlots: 0, slateSlots: 0, dupSlots: 0, droppedSlots: 0, lateSlots: 0,
-    maxLateMs: 0, engineFrames: 0, engineFramesUsed: 0, games: 0, audioUnderflows: 0, audioTrimmed: 0,
+    maxLateMs: 0, engineFrames: 0, engineFramesUsed: 0, games: 0, audioUnderflows: 0, audioTrimmed: 0, engineAudioBytes: 0, engineAudioChunks: 0, audioGapMaxMs: 0, audioGapsOver40: 0,
     blendMs: 0, blendCount: 0, maxBlendMs: 0, ffmpegPid: 0, chromePid: 0, startedAt: Date.now(),
   };
 
@@ -242,14 +242,20 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
     s.on("error", gone);
   });
 
-  const fifo = []; let fifoBytes = 0, engA = null, audioArmed = false;
+  const fifo = []; let fifoBytes = 0, engA = null, audioArmed = false, lastAudioAt = 0;
   const audioSrv = net.createServer((s) => {
     if (engA) engA.destroy();
-    engA = s; fifo.length = 0; fifoBytes = 0; audioArmed = false;
+    engA = s; fifo.length = 0; fifoBytes = 0; audioArmed = false; lastAudioAt = 0;
     log("engine audio connected");
     s.on("data", (c) => {
+      const tn = performance.now();
+      if (lastAudioAt) { const g = tn - lastAudioAt; if (g > stats.audioGapMaxMs) stats.audioGapMaxMs = Math.round(g); if (g > 40) stats.audioGapsOver40++; }
+      lastAudioAt = tn;
+      stats.engineAudioBytes += c.length; stats.engineAudioChunks++;
       fifo.push(c); fifoBytes += c.length;
-      const maxBytes = (RATE * 4 * 4 * AUDIO_JITTER_MS) / 1000;   // 4 times the jitter buffer: drop the oldest
+      // beyond the jitter buffer + 80 ms the oldest audio is dropped: after an engine stall the burst that follows would
+      // otherwise leave the sound permanently late against the picture
+      const maxBytes = (RATE * 4 * (AUDIO_JITTER_MS + 80)) / 1000;
       while (fifoBytes > maxBytes && fifo.length > 1) { fifoBytes -= fifo.shift().length; stats.audioTrimmed++; }
     });
     const gone = () => { if (engA === s) { engA = null; log("engine audio gone"); } };
@@ -295,7 +301,10 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
       if (take === head.length) fifo.shift(); else fifo[0] = head.subarray(take);
       fifoBytes -= take;
     }
-    if (got < need) { stats.audioUnderflows++; audioArmed = false; }   // the rest stays silent; refill first
+    // the shortfall stays silent and the buffer is refilled to its target before it plays again (without that it
+    // would run on empty and drop out every few ms). Only a gap while the engine is actively sending counts: it
+    // sends nothing while a game loads
+    if (got < need) { audioArmed = false; if (performance.now() - lastAudioAt < 150) stats.audioUnderflows++; }
     return out;
   }
 
