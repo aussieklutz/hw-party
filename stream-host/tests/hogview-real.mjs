@@ -121,6 +121,20 @@ try {
   for (let i = 0; i < 4; i++) { await b.click('[data-act="+left"]'); await sleep(500); await snap("walking left"); }
   log(`${shots.length} snapshots`);
 
+  // the pointer pad: in party mode the phone streams cursor deltas, applied like a mouse (the camera follows them)
+  if (process.env.POINTER === "1") {
+    log("phase: pointer start");
+    for (let i = 0; i < 8; i++) { await b.click('[data-cur="left"]'); await sleep(150); }
+    for (let i = 0; i < 6; i++) { await b.click('[data-cur="up"]'); await sleep(150); }
+    log("phase: pointer moved");
+    await sleep(4000);
+    log("phase: pointer idle 4s");
+    await b.click("#cclick"); await sleep(1500);
+    log("phase: clicked");
+    await sleep(6000);
+    log("phase: idle 6s after click");
+  }
+
   // where did the engine say the hog was, relative to the middle of the frame?
   await sleep(1500);
   const hf = join(OUT, "dbg", "hints.json");
