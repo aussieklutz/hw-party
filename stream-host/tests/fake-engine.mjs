@@ -32,11 +32,20 @@ export class FakeEngine {
   }
 
   async start() {
-    const connect = (port) => new Promise((res, rej) => {
-      const s = net.connect(port, "127.0.0.1", () => res(s));
-      s.once("error", rej);
-      s.on("error", () => {});
-    });
+    // like the engine, which starts after its encoder: retry for a few seconds
+    const connect = async (port) => {
+      for (let i = 0; ; i++) {
+        try {
+          return await new Promise((res, rej) => {
+            const s = net.connect(port, "127.0.0.1", () => { s.removeListener("error", rej); s.on("error", () => {}); res(s); });
+            s.once("error", rej);
+          });
+        } catch (e) {
+          if (i >= 40) throw e;
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      }
+    };
     this.audio = await connect(this.audioPort);
     this.audio.write(Buffer.alloc(32768));                  // the probe silence the engine sends first
     this.video = await connect(this.videoPort);
@@ -46,7 +55,7 @@ export class FakeEngine {
     const t0 = performance.now();
     this.t0 = t0;
     const step = 1000 / this.fps, audioStep = 10;
-    let n = 0, a = 0, nextFlash = this.flashEvery ? 500 : Infinity, burst = 0;
+    let whiteLeft = 0, n = 0, a = 0, nextFlash = this.flashEvery ? 500 : Infinity, burst = 0;
     const tick = () => {
       if (!this.running) return;
       const now = performance.now() - t0;
@@ -64,13 +73,20 @@ export class FakeEngine {
         a++;
       }
       while (n * step <= now) {                             // video: at the engine's rate
-        let buf = this.frames[(n >> 3) & 7];
-        if (now >= nextFlash) {
-          buf = this.white; nextFlash += this.flashEvery;
-          this.flashes.push({ perf: performance.now(), wall: Date.now(), frame: n });
-          if (this.audioFlash) burst = 5;
-        }
-        if (this.video.writableLength < 4 * buf.length) this.video.write(buf);   // like the engine: drop when the consumer lags
+        const wantFlash = now >= nextFlash || whiteLeft > 0;
+        const buf = wantFlash ? this.white : this.frames[(n >> 3) & 7];
+        // like the engine: a frame is dropped when the consumer lags; a flash is only logged (and the next
+        // one scheduled) when it really was written, so the log is ground truth
+        if (this.video.writableLength < 4 * buf.length) {
+          this.video.write(buf);
+          if (whiteLeft > 0) whiteLeft--;
+          else if (wantFlash) {
+            whiteLeft = 2;                                  // three white frames in a row (48 ms): a resampler cannot skip it
+            nextFlash += this.flashEvery;
+            this.flashes.push({ perf: performance.now(), wall: Date.now(), frame: n });
+            if (this.audioFlash) burst = 5;
+          }
+        } else this.dropped = (this.dropped ?? 0) + 1;
         this.framesWritten++;
         n++;
       }

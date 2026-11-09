@@ -13,4 +13,4 @@ const origPush = eng.flashes.push.bind(eng.flashes);
 eng.flashes.push = (f) => { console.log(JSON.stringify({ flash: performance.timeOrigin + f.perf })); return origPush(f); };
 await eng.start();
 console.log(JSON.stringify({ started: performance.timeOrigin + performance.now() }));
-setTimeout(() => { eng.stop(); console.log(JSON.stringify({ stopped: eng.framesWritten })); process.exit(0); }, Number(e.SECONDS ?? 20) * 1000);
+setTimeout(() => { eng.stop(); console.log(JSON.stringify({ stopped: eng.framesWritten, engineDropped: eng.dropped ?? 0 })); process.exit(0); }, Number(e.SECONDS ?? 20) * 1000);

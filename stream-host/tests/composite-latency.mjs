@@ -13,6 +13,7 @@
 //      LABEL (name in the output), TEST_PORT (19350), TEST_TAP (19101), HW_STAGE, OVERLAY_URL
 import { spawn } from "node:child_process";
 import os from "node:os";
+import { writeFileSync } from "node:fs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { startMediamtx, sleep, tools, withGpuLock, cpuSeconds, pidsByCommandLine, gpuSample } from "./composite-lib.mjs";
@@ -37,6 +38,7 @@ async function run() {
   const mtx = await startMediamtx(PORT);
   let host = null, engine = null, reader = null;
   const flashes = [], arrivals = [];
+  let engineInfo = null;
   try {
     host = spawn(process.execPath, [join(here, "composite-host.mjs")], { stdio: ["pipe", "pipe", "inherit"], env: { ...process.env, MODE } });
     const hostLines = [];
@@ -58,7 +60,7 @@ async function run() {
       let i;
       while ((i = buf.indexOf("\n")) >= 0) {
         const line = buf.slice(0, i); buf = buf.slice(i + 1);
-        try { const j = JSON.parse(line); if (j.flash) flashes.push(j.flash); } catch {}
+        try { const j = JSON.parse(line); if (j.flash) flashes.push(j.flash); if (j.stopped) engineInfo = j; } catch {}
       }
     });
     };
@@ -66,6 +68,7 @@ async function run() {
     const FR = 32 * 18;
     let rbuf = Buffer.alloc(0);
     const rstat = { n: 0, min: 255, max: 0 };
+    const trace = [];
     const startReader = () => {
       reader = spawn(tools().ffmpeg, ["-hide_banner", "-loglevel", "error", "-nostdin", "-fflags", "nobuffer", "-flags", "low_delay",
         "-probesize", "1000000", "-analyzeduration", "1500000", "-i", url, "-an", "-vf", "scale=32:18:flags=neighbor,format=gray", "-fps_mode", "passthrough", "-f", "rawvideo", "pipe:1"],
@@ -78,6 +81,7 @@ async function run() {
           let sum = 0;
           for (let i = 0; i < FR; i++) sum += rbuf[i];
           const mean = sum / FR; rstat.n++; rstat.min = Math.min(rstat.min, mean); rstat.max = Math.max(rstat.max, mean);
+          trace.push([Math.round(t), Math.round(mean)]);
           if (mean > 200) arrivals.push(t);
           rbuf = rbuf.subarray(FR);
         }
@@ -113,19 +117,21 @@ async function run() {
 
     // pair flashes and arrivals
     const lat = [];
-    for (const f of flashes.slice(6)) {
+    const joined = trace.length ? trace[0][0] + 2000 : Infinity;   // the reader needs a moment to join
+    for (const f of flashes.filter((x) => x > joined)) {
       const a = arrivals.find((t) => t > f && t - f < 5000);
       if (a) lat.push(a - f);
     }
-    const nearest = flashes.slice(6, 12).map((f) => { const d = arrivals.map((t) => t - f).filter((x) => x > -3000); return d.length ? Math.round(Math.min(...d.filter((x) => x > 0), 99999)) : null; });
+    const nearest = flashes.filter((x) => x > joined).slice(0, 6).map((f) => { const d = arrivals.map((t) => t - f).filter((x) => x > -3000); return d.length ? Math.round(Math.min(...d.filter((x) => x > 0), 99999)) : null; });
     lat.sort((x, y) => x - y);
     const q = (p) => (lat.length ? Math.round(lat[Math.min(lat.length - 1, Math.floor(p * lat.length))]) : null);
     const result = {
-      label: LABEL, readerFrames: rstat, arrivals: arrivals.length, firstNearest: nearest, mode: MODE, encoder: ENCODER, size: `${W}x${H}@${FPS}`, flashes: flashes.length, matched: lat.length,
+      label: LABEL, engineInfo, readerFrames: rstat, arrivals: arrivals.length, firstNearest: nearest, mode: MODE, encoder: ENCODER, size: `${W}x${H}@${FPS}`, flashes: flashes.length, matched: lat.length,
       latencyMs: { min: q(0), p50: q(0.5), p90: q(0.9), max: q(1) }, load, gpuMyFfmpeg: gmax, gpuAllProcesses: gall,
       ...(fwd ? { forwarder: (({ slots, gameSlots, droppedSlots, lateSlots, maxLateMs, dupSlots, audioUnderflows, blendMsAvg, maxBlendMs, ffmpegStarts, engineFrames, loopDelayMs }) => ({ slots, gameSlots, droppedSlots, lateSlots, maxLateMs, dupSlots, audioUnderflows, blendMsAvg, maxBlendMs, ffmpegStarts, engineFrames, loopDelayMs }))(fwd) } : {}),
     };
     console.log("RESULT " + JSON.stringify(result));
+    if (process.env.TRACE) writeFileSync(process.env.TRACE, JSON.stringify({ flashes: flashes.map(Math.round), trace }));
   } finally {
     try { reader?.kill(); } catch {}
     try { engine?.kill(); } catch {}
