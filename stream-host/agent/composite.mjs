@@ -73,6 +73,7 @@ const GAME_STALL_MS = Number(env.GAME_STALL_MS ?? 1500);   // a silent engine th
 const AUDIO_JITTER_MS = Number(env.AUDIO_JITTER_MS ?? 500); // how much engine audio waits before it is let out (the engine's audio arrives in bursts: measured gaps up to 450 ms)
 const AUDIO_SLACK_MS = Number(env.AUDIO_SLACK_MS ?? 300);   // beyond jitter + slack the oldest audio is dropped
 const AUDIO_REARM_MS = Number(env.AUDIO_REARM_MS ?? 150);   // after an underrun the audio comes back once this much has refilled
+const AUDIO_ADAPT = Number(env.AUDIO_ADAPT ?? 0.03);          // the audio is read up to this much faster or slower to follow the engine's clock
 const VIDEO_DELAY_MS = Number(env.VIDEO_DELAY_MS ?? AUDIO_JITTER_MS);   // the picture waits as long as the sound, to stay in sync
 const AUDIO_LEAD_MS = Number(env.AUDIO_LEAD_MS ?? 50);     // audio runs this far ahead of the video in the muxer (see below)
 const MAX_BACKLOG = FRAME * 4;                             // output bytes waiting before slots are dropped
@@ -266,21 +267,34 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
     s.on("error", gone);
   });
 
-  const fifo = []; let fifoBytes = 0, engA = null, audioArmed = false, audioPrimed = false, lastAudioAt = 0;
+  // The engine's audio goes into a ring of 16 bit stereo frames and is read out by a resampler whose speed follows the
+  // fill level: the engine's audio clock is not the stream's (with music on it delivered only about 90% of real time, with
+  // it off 97-99%), so playing it at a fixed speed runs the buffer dry. The nearer the buffer is to empty the slower
+  // it is read, by at most AUDIO_ADAPT (3%: under half a semitone), which is smooth instead of a dropout.
+  const AUDIO_RING = RATE * 4;
+  const aring = new Int16Array(AUDIO_RING * 2);
+  let aWr = 0, aRp = 0, aCarry = Buffer.alloc(0);          // frames written, read position (frames, fractional)
+  let engA = null, audioArmed = false, audioPrimed = false, lastAudioAt = 0;
   const audioSrv = net.createServer((s) => {
     if (engA) engA.destroy();
-    engA = s; fifo.length = 0; fifoBytes = 0; audioArmed = false; audioPrimed = false; lastAudioAt = 0;
+    engA = s; aWr = 0; aRp = 0; aCarry = Buffer.alloc(0); audioArmed = false; audioPrimed = false; lastAudioAt = 0;
     log("engine audio connected");
     s.on("data", (c) => {
       const tn = performance.now();
       if (lastAudioAt) { const g = tn - lastAudioAt; if (g > stats.audioGapMaxMs) stats.audioGapMaxMs = Math.round(g); if (g > 40) stats.audioGapsOver40++; }
       lastAudioAt = tn;
       stats.engineAudioBytes += c.length; stats.engineAudioChunks++;
-      fifo.push(c); fifoBytes += c.length;
+      const data = aCarry.length ? Buffer.concat([aCarry, c]) : c;   // a chunk can end in the middle of a frame
+      const whole = data.length - (data.length % 4);
+      for (let o = 0; o < whole; o += 4, aWr++) {
+        const k = (aWr % AUDIO_RING) * 2;
+        aring[k] = data.readInt16LE(o); aring[k + 1] = data.readInt16LE(o + 2);
+      }
+      aCarry = whole < data.length ? Buffer.from(data.subarray(whole)) : Buffer.alloc(0);
       // beyond the jitter buffer + the slack the oldest audio is dropped: after an engine stall the burst that follows would
       // otherwise leave the sound permanently late against the picture
-      const maxBytes = (RATE * 4 * (AUDIO_JITTER_MS + AUDIO_SLACK_MS)) / 1000;
-      while (fifoBytes > maxBytes && fifo.length > 1) { fifoBytes -= fifo.shift().length; stats.audioTrimmed++; }
+      const maxFrames = ((AUDIO_JITTER_MS + AUDIO_SLACK_MS) * RATE) / 1000;
+      if (aWr - aRp > maxFrames) { aRp = aWr - (AUDIO_JITTER_MS * RATE) / 1000; stats.audioTrimmed++; }
     });
     const gone = () => { if (engA === s) { engA = null; log("engine audio gone"); } };
     s.on("close", gone);
@@ -312,25 +326,29 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
   for (let i = 0; i < 6; i++) { const b = Buffer.allocUnsafe(FRAME); pool.push(b); poolFree.push(b); }
 
   function audioChunk(samples) {
-    const need = samples * 4, out = Buffer.alloc(need);       // zeros: silence
-    if (!engA && !fifoBytes) { audioArmed = false; return out; }
+    const o = new Int16Array(samples * 2);                    // zeros: silence
+    const level = aWr - aRp;
+    if (!engA && level < 2) { audioArmed = false; return Buffer.from(o.buffer); }
     if (!audioArmed) {
       // the first time the full wait; after an underrun only a short refill, so one late burst costs a blip, not half a second
-      if (fifoBytes < (RATE * 4 * (audioPrimed ? AUDIO_REARM_MS : AUDIO_JITTER_MS)) / 1000) return out;   // still filling: silence
+      if (level < ((audioPrimed ? AUDIO_REARM_MS : AUDIO_JITTER_MS) * RATE) / 1000) return Buffer.from(o.buffer);   // still filling: silence
       audioArmed = true; audioPrimed = true;
     }
-    let got = 0;
-    while (got < need && fifo.length) {
-      const head = fifo[0], take = Math.min(need - got, head.length);
-      head.copy(out, got, 0, take); got += take;
-      if (take === head.length) fifo.shift(); else fifo[0] = head.subarray(take);
-      fifoBytes -= take;
+    const target = (AUDIO_JITTER_MS * RATE) / 1000;
+    const rho = 1 + Math.max(-AUDIO_ADAPT, Math.min(AUDIO_ADAPT, (level - target) / (target * 8)));
+    let rp = aRp, i = 0;
+    for (; i < samples; i++, rp += rho) {
+      const i0 = Math.floor(rp);
+      if (i0 + 1 >= aWr) break;                               // the next input frame has not arrived
+      const f = rp - i0, a = (i0 % AUDIO_RING) * 2, b = ((i0 + 1) % AUDIO_RING) * 2;
+      o[i * 2] = aring[a] + (aring[b] - aring[a]) * f;
+      o[i * 2 + 1] = aring[a + 1] + (aring[b + 1] - aring[a + 1]) * f;
     }
-    // the shortfall stays silent and the buffer is refilled to its target before it plays again (without that it
-    // would run on empty and drop out every few ms). Only a gap while the engine is actively sending counts: it
-    // sends nothing while a game loads
-    if (got < need) { audioArmed = false; if (performance.now() - lastAudioAt < 150) stats.audioUnderflows++; }
-    return out;
+    aRp = rp;
+    // the shortfall stays silent and the buffer is refilled before it plays again (without that it would run on empty
+    // and drop out every few ms). Only a gap while the engine is actively sending counts: it sends nothing while a game loads
+    if (i < samples) { audioArmed = false; if (performance.now() - lastAudioAt < 150) stats.audioUnderflows++; }
+    return Buffer.from(o.buffer);
   }
 
   // where the engine says the active hog (and its target, when it has one) is on screen: 20 bytes, five LE int32

@@ -42,6 +42,10 @@ What you set by hand:
   /stream/ slide show by default), OVERLAY_GAME_URL (a page drawn over the game, off by default,
   for example <WORKER_URL>/stream/scoreboard.html), SLATE_COLOR, OVERLAY=0, VIDEO_KBPS.
 
+The sound: the stream has the game's sound effects and voices but no background music (STREAM_MUSIC=1 in .env
+brings it back; the engine's audio then runs about 10% slow and the sound is choppy). Audio and picture are
+delayed by half a second (AUDIO_JITTER_MS, VIDEO_DELAY_MS) so that bursts from the engine do not reach the stream.
+
 The view: the game is zoomed to 150% (STREAM_ZOOM in .env; 100 is the engine's default, 175 the closest)
 and the camera keeps the active hog in the middle of the frame.
 
