@@ -233,7 +233,8 @@ export default {
                 // the entry box with the adjusted version in it, unclaimed
                 const box = document.getElementById("name");
                 box.value = d.suggest;
-                out.textContent = "That name has to change for the stream. We suggest \"" + d.suggest + "\" - edit it, or press the button to take it.";
+                // single quotes: this script sits in a template literal, where a backslash-quote would lose its backslash
+                out.textContent = 'That name has to change for the stream. We suggest "' + d.suggest + '" - edit it, or press the button to take it.';
                 out.className = "ok";
                 box.focus(); box.select();
                 return;
