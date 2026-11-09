@@ -55,7 +55,7 @@ procedure InitAudioTap;
 procedure freeModule;
 
 implementation
-uses SysUtils, uVariables, uConsts, GLunit, SDLh, uConsole, uUtils;
+uses SysUtils, uVariables, uConsts, GLunit, SDLh, uConsole, uUtils, uFloat, uTypes;
 
 const
     GL_BGRA_FORMAT = $80E1;
@@ -109,7 +109,8 @@ type
     TFramebufferTexture2D = procedure(target, attachment, textarget, texture: LongWord; level: LongInt); cdecl;
     TCheckFramebufferStatus = function(target: LongWord): LongWord; cdecl;
 
-var videoSock, audioSock: PTCPSocket;
+var videoSock, audioSock, hintSock: PTCPSocket;
+    hintCounter: LongInt;
     frameBuffer: PByte;
     frameSize: LongInt;
     frameWidth, frameHeight: LongInt;
@@ -219,6 +220,17 @@ begin
         WriteToConsole('Frame tap: connecting to port ' + IntToStr(cStreamVideoPort) + ' ');
         videoSock:= OpenSocket(cStreamVideoPort);
         if videoSock = nil then
+            WriteLnToConsole(msgFailed)
+        else
+            WriteLnToConsole(msgOK)
+        end;
+
+    // where the active hedgehog is on screen, for a viewer that wants a close-up (optional)
+    if cStreamHintPort <> 0 then
+        begin
+        WriteToConsole('Hint tap: connecting to port ' + IntToStr(cStreamHintPort) + ' ');
+        hintSock:= OpenSocket(cStreamHintPort);
+        if hintSock = nil then
             WriteLnToConsole(msgFailed)
         else
             WriteLnToConsole(msgOK)
@@ -727,6 +739,41 @@ begin
         end
 end;
 
+// Where the active hedgehog and its target are on the screen, in the pixels of the frame that is being
+// sent (top row first): five little endian 32 bit integers, flags (1 hedgehog, 2 target), hog x, hog y,
+// target x, target y. About 20 a second. A consumer that stops reading only costs this socket.
+procedure SendHint;
+var rec: array[0..4] of LongInt;
+    k: Double;
+begin
+    if hintSock = nil then
+        exit;
+    inc(hintCounter);
+    if hintCounter mod 3 <> 0 then
+        exit;
+    FillChar(rec, SizeOf(rec), 0);
+    // cScaleFactor is 2 with no zoom, where world + (WorldDx, WorldDy) is already a screen position
+    // (x counted from the middle of the screen)
+    k:= cScaleFactor / 2;
+    if (CurrentHedgehog <> nil) and (CurrentHedgehog^.Gear <> nil) then
+        begin
+        rec[0]:= 1;
+        rec[1]:= round(cScreenWidth / 2 + (hwRound(CurrentHedgehog^.Gear^.X) + WorldDx) * k);
+        rec[2]:= round(cScreenHeight / 2 + (hwRound(CurrentHedgehog^.Gear^.Y) + WorldDy - cScreenHeight / 2) * k)
+        end;
+    if TargetPoint.X <> NoPointX then
+        begin
+        rec[0]:= rec[0] or 2;
+        rec[3]:= round(cScreenWidth / 2 + (TargetPoint.X + WorldDx) * k);
+        rec[4]:= round(cScreenHeight / 2 + (TargetPoint.Y + WorldDy - cScreenHeight / 2) * k)
+        end;
+    if SDLNet_TCP_Send(hintSock, @rec, SizeOf(rec)) < SizeOf(rec) then
+        begin
+        SDLNet_TCP_Close(hintSock);
+        hintSock:= nil
+        end
+end;
+
 procedure TapFrame;
 begin
     if (cStreamVideoPort = 0) or tapFailed then
@@ -764,6 +811,7 @@ begin
     end;
     if tapNV12 then
         EndConversion;
+    SendHint;
 
     inc(statFrames);
     if showStats and (statFrames >= statsFrames) then
@@ -863,6 +911,9 @@ begin
         audioSock:= nil
         end;
     StopVideoTap;
+    if hintSock <> nil then
+        SDLNet_TCP_Close(hintSock);
+    hintSock:= nil;
     if frameBuffer <> nil then
         FreeMem(frameBuffer);
     frameBuffer:= nil
