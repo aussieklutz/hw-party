@@ -95,7 +95,8 @@ export function startHogView({ ffmpeg, frameW, frameH, getFrame, getTarget, onJp
     const hint = getHint();
     if (debugDir) hintLog.push({ n: stats.frames, hint });
     const tx = hint ? hint.x : frameW / 2, ty = hint ? hint.y : frameH / 2;
-    if (sid !== lastSid || (hint && !hadHint)) { cx = tx; cy = ty; } else { cx += (tx - cx) * 0.35; cy += (ty - cy) * 0.35; }
+    const follow = hint?.target ? 0.6 : 0.35;   // a cursor moves fast: follow it more closely
+    if (sid !== lastSid || (hint && !hadHint)) { cx = tx; cy = ty; } else { cx += (tx - cx) * follow; cy += (ty - cy) * follow; }
     lastSid = sid; hadHint = !!hint;
     const x0 = Math.min(frameW - cw, Math.max(0, Math.round(cx - cw / 2))) & ~1;
     const y0 = Math.min(frameH - ch, Math.max(0, Math.round(cy - ch / 2))) & ~1;

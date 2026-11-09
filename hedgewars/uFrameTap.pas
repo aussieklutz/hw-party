@@ -740,8 +740,8 @@ begin
 end;
 
 // Where the active hedgehog and its target are on the screen, in the pixels of the frame that is being
-// sent (top row first): five little endian 32 bit integers, flags (1 hedgehog, 2 target), hog x, hog y,
-// target x, target y. About 20 a second. A consumer that stops reading only costs this socket.
+// sent (top row first): five little endian 32 bit integers, flags (1 hedgehog, 2 cursor in use), hog x, hog y,
+// cursor x, cursor y. About 20 a second. A consumer that stops reading only costs this socket.
 procedure SendHint;
 var rec: array[0..4] of LongInt;
     k: Double;
@@ -761,11 +761,13 @@ begin
         rec[1]:= round(cScreenWidth / 2 + (hwRound(CurrentHedgehog^.Gear^.X) + WorldDx) * k);
         rec[2]:= round(cScreenHeight / 2 + (hwRound(CurrentHedgehog^.Gear^.Y) + WorldDy - cScreenHeight / 2) * k)
         end;
-    if TargetPoint.X <> NoPointX then
+    // the cursor, while a weapon that is aimed with it is selected: CursorPoint is in the units the camera uses
+    // (x from the middle of the screen, y counted up from the bottom), one unit being k pixels
+    if isCursorVisible then
         begin
         rec[0]:= rec[0] or 2;
-        rec[3]:= round(cScreenWidth / 2 + (TargetPoint.X + WorldDx) * k);
-        rec[4]:= round(cScreenHeight / 2 + (TargetPoint.Y + WorldDy - cScreenHeight / 2) * k)
+        rec[3]:= round(cScreenWidth / 2 + CursorPoint.X * k);
+        rec[4]:= round(cScreenHeight / 2 + (cScreenHeight / 2 - CursorPoint.Y) * k)
         end;
     if SDLNet_TCP_Send(hintSock, @rec, SizeOf(rec)) < SizeOf(rec) then
         begin
