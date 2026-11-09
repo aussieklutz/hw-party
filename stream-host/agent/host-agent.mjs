@@ -21,7 +21,7 @@ import net from "node:net";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import os, { tmpdir } from "node:os";
 import { join } from "node:path";
 import { filterName } from "./safewords.mjs";
 import { videoInit, videoSetPhase, videoEngineArgs } from "./video.mjs";
@@ -506,6 +506,11 @@ function spawnEngine(port) {
     stdio: ["ignore", "pipe", "pipe"],
     env: tap ? { ...process.env, ...tap.env } : process.env,
   });
+  // in composite mode the agent and its ffmpeg run at high priority: the engine, whose audio thread has to wake up on
+  // time every ~90 ms, must not be the one that loses to them (it produced only 91% of the audio when it did)
+  if (tap && process.env.FEED_MODE === "composite" && process.env.FEED_PRIORITY !== "normal") {
+    try { os.setPriority(proc.pid, os.constants.priority.PRIORITY_HIGH); } catch (e) { log("could not raise the engine's priority:", e.message); }
+  }
   proc.stdout.on("data", (d) => process.stdout.write(`[engine] ${d}`));
   proc.stderr.on("data", (d) => process.stderr.write(`[engine] ${d}`));
   proc.on("exit", (code) => {
