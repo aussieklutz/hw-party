@@ -122,8 +122,8 @@ export function analyze(file, { fps = 60, kbps = 6000 } = {}) {
   return out;
 }
 
-/** Runs fn while holding the shared GPU lock (mkdir is atomic); always releases it. */
-export async function withGpuLock(fn, { wait = 15 * 60 * 1000 } = {}) {
+/** Takes the shared GPU lock (mkdir is atomic), waiting up to 15 minutes; returns the release function. */
+export async function acquireGpuLock({ wait = 15 * 60 * 1000 } = {}) {
   const dir = process.env.GPU_LOCK ?? "C:/Users/clint/.t3/scratch/exp/gpu.lock";
   const { mkdirSync, rmdirSync } = await import("node:fs");
   const deadline = Date.now() + wait;
@@ -134,8 +134,15 @@ export async function withGpuLock(fn, { wait = 15 * 60 * 1000 } = {}) {
       await sleep(20000);
     }
   }
-  const release = () => { try { rmdirSync(dir); } catch {} };
+  let released = false;
+  const release = () => { if (!released) { released = true; try { rmdirSync(dir); } catch {} } };
   process.once("exit", release);
+  return release;
+}
+
+/** Runs fn while holding the shared GPU lock; always releases it. */
+export async function withGpuLock(fn, opts) {
+  const release = await acquireGpuLock(opts);
   try { return await fn(); } finally { release(); }
 }
 

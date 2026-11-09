@@ -16,6 +16,7 @@
 // env: BASE (default http://127.0.0.1:8790)   CHROME   OUT_DIR
 //      ENGINE_LOGS  the engine's Logs directory (default %TEMP%\hw-stream\Logs)
 //      AGENT_LOG    the agent's output file, scanned for "bad msg"
+//      CDP_PORT     the phone browser's DevTools port (default 9600)
 //      WEAPONS      only these (numbers or names, comma separated)
 //      MAX_MINUTES  give up after this long (default 90)
 import { spawn, spawnSync } from "node:child_process";
@@ -226,7 +227,7 @@ function evidence(slice) {
 }
 
 // ---- the player -------------------------------------------------------------------------
-const b = new Browser(9600);
+const b = new Browser(Number(process.env.CDP_PORT ?? 9600));
 const results = new Map(); // w -> result
 let borderedRoom = ""; // the room whose map has a border (its strike weapons are out)
 const tries = new Map();

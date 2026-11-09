@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { FakeEngine } from "./fake-engine.mjs";
-import { startMediamtx, startRecorder, analyze, sleep, tools } from "./composite-lib.mjs";
+import { startMediamtx, startRecorder, analyze, sleep, tools, acquireGpuLock } from "./composite-lib.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const W = Number(process.env.TEST_W ?? 1280), H = Number(process.env.TEST_H ?? 720), FPS = Number(process.env.TEST_FPS ?? 60);
@@ -38,6 +38,7 @@ const { compositeStart } = await import("../agent/composite.mjs");
 let failed = 0;
 const check = (name, ok, detail = "") => { if (!ok) failed++; console.log(ok ? "PASS" : "FAIL", name, detail); };
 
+const releaseLock = process.env.ENCODER === "qsv" ? await acquireGpuLock() : () => {};   // Quick Sync is shared: take the lock
 const mtx = await startMediamtx(PORT);
 let comp, rec;
 try {
@@ -104,6 +105,7 @@ try {
 } finally {
   await comp?.stop().catch(() => {});
   mtx.kill();
+  releaseLock();
 }
 console.log(failed ? `${failed} FAILED` : "all passed");
 process.exit(failed ? 1 : 0);
