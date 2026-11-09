@@ -60,6 +60,15 @@ class Browser {
     if (!r) throw new Error(`no ${sel}`);
     for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await this.send("Input.dispatchMouseEvent", { type, x: r.x, y: r.y, button: "left", clickCount: 1 });
   }
+  // hold a button down (the pointer pad moves the cursor while a direction is held)
+  async hold(sel, ms) {
+    const r = await this.eval(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});if(!e)return null;const b=e.getBoundingClientRect();return {x:b.x+b.width/2,y:b.y+b.height/2}})()`);
+    if (!r) throw new Error(`no ${sel}`);
+    await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: r.x, y: r.y, button: "none" });
+    await this.send("Input.dispatchMouseEvent", { type: "mousePressed", x: r.x, y: r.y, button: "left", clickCount: 1 });
+    await sleep(ms);
+    await this.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: r.x, y: r.y, button: "left", clickCount: 1 });
+  }
   close() { try { this.ws.close(); } catch {} if (this.proc?.pid) spawnSync("taskkill", ["/PID", String(this.proc.pid), "/T", "/F"], { stdio: "ignore" }); }
 }
 
@@ -85,7 +94,7 @@ try {
       ENGINE_USERPREFIX: join(tmpdir(), "hw-hogview"),
       STREAM_TAP: "1", FEED_MODE: "composite", FEED_URL: join(OUT, "feed.flv").replace(/\\/g, "/"), ENCODER: process.env.ENCODER ?? "qsv",
       STREAM_WIDTH: W, STREAM_HEIGHT: H, STREAM_FPS: "60", FFMPEG_BIN: process.env.FFMPEG_BIN, OVERLAY: "0",
-      HOG_VIEW_DEBUG: join(OUT, "dbg"), HOG_HEALTH: "500", SD_TURNS: "500",
+      HOG_VIEW_DEBUG: join(OUT, "dbg"), HOG_HEALTH: "500", SD_TURNS: "500", ...(process.env.CURSOR === "1" ? { AMMO_ALL: "1" } : {}),
       LOBBY_WAIT_MS: "600000", ROUND_WAIT_MS: "15000", SLATE_MS: "1000", POP_COUNT: "2",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -135,6 +144,24 @@ try {
     log("phase: idle 6s after click");
   }
 
+  // a weapon that is aimed with the cursor (Air Attack): the cutout must follow the cursor, not the hog
+  if (process.env.CURSOR === "1") {
+    log("phase: cursor weapon");
+    await b.click("#weaponsBtn");
+    await until("weapons panel", () => b.eval(`document.getElementById("weaponspanel").classList.contains("open")`), 4000, 100);
+    const idx = await b.eval(`(()=>{const cells=[...document.querySelectorAll("#wgridwrap .wcell")];
+      const i=cells.findIndex(c=>c.querySelector(".wname")?.textContent==="Air Attack");
+      cells.forEach((c,j)=>c.dataset.pick=j===i?"1":"");return i})()`);
+    if (idx < 0) throw new Error("no Air Attack in the weapons panel");
+    await b.click('#wgridwrap .wcell[data-pick="1"]');
+    await sleep(250); await b.click("#wclose"); await sleep(1500);
+    await snap("air attack selected");
+    for (let r = 0; r < 4; r++) { await b.hold('[data-cur="left"]', 700); await sleep(500); await snap("cursor moved left"); }
+    for (let r = 0; r < 3; r++) { await b.hold('[data-cur="up"]', 500); await sleep(500); await snap("cursor moved up"); }
+    for (let r = 0; r < 3; r++) { await b.hold('[data-cur="right"]', 900); await sleep(500); await snap("cursor moved right"); }
+    log("phase: cursor done");
+  }
+
   // where did the engine say the hog was, relative to the middle of the frame?
   await sleep(1500);
   const hf = join(OUT, "dbg", "hints.json");
@@ -143,7 +170,9 @@ try {
   if (hints.length) {
     const dx = hints.map((h) => h.x - Number(W) / 2), dy = hints.map((h) => h.y - Number(H) / 2);
     const rng = (a) => `${Math.min(...a)}..${Math.max(...a)}`;
-    console.log(`   hog offset from the middle of the frame: x ${rng(dx)}, y ${rng(dy)} px; targets: ${hints.filter((h) => h.target).length}`);
+    console.log(`   hog offset from the middle of the frame: x ${rng(dx)}, y ${rng(dy)} px; cursor reported in ${hints.filter((h) => h.target).length} of ${hints.length}`);
+    const cur = hints.filter((h) => h.target);
+    if (cur.length) console.log(`   cursor hint positions (frame px): ${[0, .25, .5, .75, 1].map((f) => cur[Math.min(cur.length - 1, Math.floor(f * cur.length))]).map((h) => `(${h.x},${h.y})`).join(" ")}`);
   }
   writeFileSync(join(OUT, "shots.json"), JSON.stringify(shots, null, 1));
 } catch (e) {
