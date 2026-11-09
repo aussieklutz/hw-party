@@ -163,9 +163,9 @@ export function pidsByCommandLine(marker) {
 
 /** GPU engine utilisation (Windows counters) summed per engine type for the given pids; one sample. */
 export function gpuSample(pids) {
-  const r = spawnSync("powershell", ["-NoProfile", "-Command",
-    `(Get-Counter '\GPU Engine(*)\Utilization Percentage' -ErrorAction SilentlyContinue).CounterSamples | ForEach-Object { "$($_.InstanceName)|$($_.CookedValue)" }`],
-  { encoding: "utf8", maxBuffer: 1 << 24 });
+  const script = "(Get-Counter '\\GPU Engine(*)\\Utilization Percentage' -ErrorAction SilentlyContinue).CounterSamples | ForEach-Object { $_.InstanceName + '|' + $_.CookedValue }";
+  const r = spawnSync("powershell", ["-NoProfile", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+    { encoding: "utf8", maxBuffer: 1 << 24 });
   const per = {}, all = {};
   for (const l of r.stdout.split("\n")) {
     const [inst, v] = l.trim().split("|");
