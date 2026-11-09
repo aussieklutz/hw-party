@@ -78,6 +78,12 @@ OBS pulls `rtmp://localhost:1935/live/game` as usual. Set `ENCODER=nvenc` or
 The same tap works anywhere: `STREAM_TAP=1` on Linux uses SDL's offscreen
 video driver, so it needs no X server either.
 
+Without OBS (`FEED_MODE=composite`, experimental): one ffmpeg lives for the whole
+agent session, composes the game (or a slate between games) with the worker's scoreboard
+page and streams straight to Twitch (`TWITCH_KEY` in `.env`), so the stream never drops
+between games. See `experiments/ffmpeg-composite.md` for how it works, what was measured and
+what you give up compared with OBS; `windowselease-readme.txt` lists what to set by hand.
+
 The engine converts each frame to NV12 on the graphics card (a fragment shader,
 BT.709 limited range, a third of the data of BGRA and nothing for ffmpeg to
 convert or flip), reads it back through a ring of pixel buffer objects and sends
