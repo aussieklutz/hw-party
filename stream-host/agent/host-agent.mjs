@@ -1084,7 +1084,7 @@ async function main() {
     const hogView = process.env.HOG_VIEW === "0" ? null : startHogView({
       ffmpeg: process.env.FFMPEG_BIN ?? "ffmpeg",
       frameW: Number(process.env.STREAM_WIDTH ?? 1920), frameH: Number(process.env.STREAM_HEIGHT ?? 1080),
-      getFrame: comp.latestFrame, getTarget: () => activeSid, log,
+      getFrame: comp.latestFrame, getTarget: () => activeSid, getHint: comp.latestHint, log,
       onJpeg(sid, jpeg) {
         if (!ws || ws.readyState !== 1 || ws.bufferedAmount > 256 * 1024) return;
         const id = Buffer.from(sid);

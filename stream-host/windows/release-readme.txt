@@ -42,6 +42,11 @@ What you set by hand:
   /stream/ slide show by default), OVERLAY_GAME_URL (a page drawn over the game, off by default,
   for example <WORKER_URL>/stream/scoreboard.html), SLATE_COLOR, OVERLAY=0, VIDEO_KBPS.
 
+The close-up: while a player has the turn, their phone shows a small live picture of their hog (about
+15 pictures a second, sent to that phone only, never to Twitch) above the cursor keys, with a "Close-up"
+button to switch it off. HOG_VIEW=0 in .env turns it off for everyone. It needs the hwengine.exe that
+comes in this zip (an older one does not know the position option: set HOG_VIEW_HINT=0 with it).
+
 What you give up compared with OBS: scene editing (the layout is the one page per phase, set in .env),
 a webcam or any other source, alerts and chat overlays, and OBS's own preview. If you want those,
 simply leave FEED_MODE out of .env: nothing changes, the per-game feed to the local mediamtx and OBS

@@ -19,7 +19,7 @@
 //   TAP_FORMAT        nv12 | bgra: what the engine sends (default nv12: the graphics
 //                     card converts, a third of the data, nothing left to flip)
 //   TAP_FILTER        gpu | sw: where qsv converts and flips bgra frames (default gpu)
-//   TAP_VIDEO_PORT/TAP_AUDIO_PORT  local ports (default 19001/19002)
+//   TAP_VIDEO_PORT/TAP_AUDIO_PORT  local ports (default 19001/19002); TAP_HINT_PORT 19003 (composite hog close-up)
 //   TAP_STATS         1 logs ffmpeg's own progress (frame rate, duplicated and dropped frames)
 //   FFMPEG_BIN        default ffmpeg
 //   FEED_MODE         composite: one ffmpeg for the whole session, see composite.mjs
@@ -39,6 +39,7 @@ const TAP_FORMAT = process.env.TAP_FORMAT ?? "nv12";
 const TAP_FILTER = process.env.TAP_FILTER ?? "gpu";
 const VIDEO_PORT = Number(process.env.TAP_VIDEO_PORT ?? 19001);
 const AUDIO_PORT = Number(process.env.TAP_AUDIO_PORT ?? 19002);
+const HINT_PORT = Number(process.env.TAP_HINT_PORT ?? 19003);
 const FFMPEG_BIN = process.env.FFMPEG_BIN ?? "ffmpeg";
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), "[tap]", ...a);
@@ -112,6 +113,9 @@ function engineSide() {
     engineArgs: [
       "--stream-video-port", String(VIDEO_PORT),
       "--stream-audio-port", String(AUDIO_PORT),
+      // composite mode with the hog close-up: the engine also reports where the active hog and its target are
+      ...(process.env.FEED_MODE === "composite" && process.env.HOG_VIEW !== "0" && process.env.HOG_VIEW_HINT !== "0"
+        ? ["--stream-hint-port", String(HINT_PORT)] : []),
       "--hidden", "--nodampen",
       "--width", String(W), "--height", String(H),
       "--frame-interval", String(Math.max(1, Math.floor(1000 / FPS))),

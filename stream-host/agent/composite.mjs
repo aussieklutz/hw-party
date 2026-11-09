@@ -59,6 +59,8 @@ const KBPS = Number(env.VIDEO_KBPS ?? 6000);
 const AUDIO_KBPS = Number(env.AUDIO_KBPS ?? 160);
 const VIDEO_PORT = Number(env.TAP_VIDEO_PORT ?? 19001);
 const AUDIO_PORT = Number(env.TAP_AUDIO_PORT ?? 19002);
+const HINT_PORT = Number(env.TAP_HINT_PORT ?? 19003);
+const HINT_ON = env.HOG_VIEW !== "0" && env.HOG_VIEW_HINT !== "0";   // the engine reports the hog's screen position here
 const FFMPEG_BIN = env.FFMPEG_BIN ?? "ffmpeg";
 const FRAME = (W * H * 3) / 2;
 const RATE = 44100;
@@ -311,6 +313,23 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
     return out;
   }
 
+  // where the engine says the active hog (and its target, when it has one) is on screen: 20 bytes, five LE int32
+  let hint = null;
+  const hintSrv = HINT_ON ? net.createServer((s) => {
+    let held = Buffer.alloc(0);
+    s.on("data", (c) => {
+      held = held.length ? Buffer.concat([held, c]) : c;
+      while (held.length >= 20) {
+        hint = { flags: held.readInt32LE(0), hx: held.readInt32LE(4), hy: held.readInt32LE(8), tx: held.readInt32LE(12), ty: held.readInt32LE(16), at: performance.now() };
+        held = held.subarray(20);
+      }
+    });
+    s.on("close", () => { hint = null; });
+    s.on("error", () => {});
+  }) : null;
+  hintSrv?.listen(HINT_PORT, "127.0.0.1");
+  hintSrv?.on("error", (e) => log("hint port", HINT_PORT, "unavailable:", e.message));
+
   let pumping = false;
   function pump() {
     if (!t0 || !encV || pumping) return;
@@ -443,6 +462,13 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
   return {
     stats: snapshot,
     // the newest complete engine frame (NV12, valid until the next one is received) for the hog close-up
+    // where to look: the target when the hog has one (a cursor in use), else the hog; null when unknown or stale
+    latestHint: () => {
+      if (!hint || performance.now() - hint.at > 500) return null;
+      if (hint.flags & 2) return { x: hint.tx, y: hint.ty, target: true };
+      if (hint.flags & 1) return { x: hint.hx, y: hint.hy, target: false };
+      return null;
+    },
     latestFrame: () => (engV && haveGame && latest ? { buf: latest, at: latestAt } : null),
     get ffmpegPid() { return ffProc?.pid ?? 0; },
     async stop() {
@@ -452,7 +478,7 @@ export async function compositeStart({ outUrl = FEED, overlayGameUrl, overlaySla
       await new Promise((r) => setTimeout(r, 800));
       try { ffProc?.kill(); } catch {}
       engV?.destroy(); engA?.destroy();
-      videoSrv.close(); audioSrv.close(); encVSrv.close(); encASrv.close();
+      videoSrv.close(); audioSrv.close(); hintSrv?.close(); encVSrv.close(); encASrv.close();
       if (ov) await ov.stop();
     },
   };

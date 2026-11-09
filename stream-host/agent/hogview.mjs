@@ -11,7 +11,9 @@
 // env: HOG_VIEW=0 turns it off (default on in composite mode)   HOG_VIEW_FPS (15)
 //      HOG_VIEW_W / HOG_VIEW_H  size of the window cut out of a 1080 line frame (320x216, scaled with the frame)
 //      HOG_VIEW_QUALITY  mjpeg -q:v, 2 (best) .. 31 (default 5)
+//      HOG_VIEW_DEBUG    a directory: every 20th JPEG is written there with where the window was centred
 import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 
 const EOI = Buffer.from([0xff, 0xd9]);
 const even = (n) => Math.max(2, Math.round(n / 2) * 2);
@@ -32,12 +34,16 @@ export function startHogView({ ffmpeg, frameW, frameH, getFrame, getTarget, onJp
   const cw = even(Number(env.HOG_VIEW_W ?? 320) * scale);
   const ch = even(Number(env.HOG_VIEW_H ?? 216) * scale);
   const quality = String(env.HOG_VIEW_QUALITY ?? 5);
+  const debugDir = env.HOG_VIEW_DEBUG;
+  if (debugDir) mkdirSync(debugDir, { recursive: true });
+  let debugN = 0, hintLog = [];
   const stats = { frames: 0, jpegs: 0, bytes: 0, skipped: 0, ffmpegStarts: 0 };
 
   let proc = null;
   let sidOfFrame = [];           // the sid each frame in flight belongs to, in order
   let pending = Buffer.alloc(0);
   let cx = frameW / 2, cy = frameH / 2;   // the window centre, smoothed
+  let lastSid = "", hadHint = false;      // a new turn or a first hint puts the window on the hog at once
   let stopped = false;
   const out = Buffer.allocUnsafe((cw * ch * 3) / 2);
 
@@ -65,6 +71,7 @@ export function startHogView({ ffmpeg, frameW, frameH, getFrame, getTarget, onJp
         from = 0;
         const sid = sidOfFrame.shift() ?? "";
         stats.jpegs++; stats.bytes += jpeg.length;
+        if (debugDir && stats.jpegs % 20 === 0) { writeFileSync(`${debugDir}/${String(stats.jpegs).padStart(5, "0")}.jpg`, jpeg); writeFileSync(`${debugDir}/hints.json`, JSON.stringify(hintLog)); }
         if (sid) onJpeg(sid, Buffer.from(jpeg));
       }
     });
@@ -86,8 +93,10 @@ export function startHogView({ ffmpeg, frameW, frameH, getFrame, getTarget, onJp
     start();
     if (!proc || proc.stdin.writableLength > out.length * 3) { stats.skipped++; return; }
     const hint = getHint();
+    if (debugDir) hintLog.push({ n: stats.frames, hint });
     const tx = hint ? hint.x : frameW / 2, ty = hint ? hint.y : frameH / 2;
-    cx += (tx - cx) * 0.35; cy += (ty - cy) * 0.35;
+    if (sid !== lastSid || (hint && !hadHint)) { cx = tx; cy = ty; } else { cx += (tx - cx) * 0.35; cy += (ty - cy) * 0.35; }
+    lastSid = sid; hadHint = !!hint;
     const x0 = Math.min(frameW - cw, Math.max(0, Math.round(cx - cw / 2))) & ~1;
     const y0 = Math.min(frameH - ch, Math.max(0, Math.round(cy - ch / 2))) & ~1;
     crop(f.buf, x0, y0);
