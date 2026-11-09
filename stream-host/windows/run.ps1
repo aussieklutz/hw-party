@@ -9,6 +9,11 @@
 #   ffmpeg\ffmpeg.exe        an ffmpeg with h264_qsv (or h264_nvenc)
 #   mediamtx\mediamtx.exe    optional: the RTMP server OBS pulls from
 #
+# Two ways to reach Twitch:
+#   OBS (default)            one ffmpeg per game pushes to the local mediamtx, OBS pulls it and streams
+#   FEED_MODE=composite      no OBS: one ffmpeg for the whole session composites the game, the slate and the
+#                            scoreboard and streams straight to Twitch (TWITCH_KEY in .env, see .env.example)
+#
 # Needs Node.js 22 or newer on the PATH.
 
 $ErrorActionPreference = "Stop"
@@ -55,7 +60,19 @@ if (-not $env:STREAM_WIDTH) { $env:STREAM_WIDTH = "1920" }
 if (-not $env:STREAM_HEIGHT) { $env:STREAM_HEIGHT = "1080" }
 if (-not $env:STREAM_FPS) { $env:STREAM_FPS = "60" }
 if (-not $env:VIDEO_KBPS) { $env:VIDEO_KBPS = "6000" }
-if (-not $env:FEED_URL) { $env:FEED_URL = "rtmp://127.0.0.1:1935/live/game" }
+
+$composite = $env:FEED_MODE -eq "composite"
+if ($composite) {
+    # straight to Twitch: the ingest and the stream key come from .env, nothing is pulled by OBS
+    if (-not $env:FEED_URL) {
+        if (-not $env:TWITCH_KEY) { throw "FEED_MODE=composite needs TWITCH_KEY (or FEED_URL) in $envFile" }
+        if (-not $env:TWITCH_INGEST) { $env:TWITCH_INGEST = "aps20.contribute.live-video.net" } # Sydney
+        $env:FEED_URL = "rtmp://$($env:TWITCH_INGEST)/app/$($env:TWITCH_KEY)"
+    }
+    $mediamtx = $null   # nothing to serve locally unless FEED_URL points at it
+    if ($env:FEED_URL -match '^rtmp://(127\.0\.0\.1|localhost)') { $mediamtx = Find-First @("$root\mediamtx\mediamtx.exe") }
+}
+elseif (-not $env:FEED_URL) { $env:FEED_URL = "rtmp://127.0.0.1:1935/live/game" }
 
 $mtxProc = $null
 try {
@@ -64,8 +81,9 @@ try {
         if (-not $env:MTX_READTIMEOUT) { $env:MTX_READTIMEOUT = "60s" }
         if (-not $env:MTX_WRITETIMEOUT) { $env:MTX_WRITETIMEOUT = "60s" }
         $mtxProc = Start-Process $mediamtx -WorkingDirectory (Split-Path $mediamtx) -WindowStyle Hidden -PassThru
-        Write-Host "mediamtx started: OBS Media Source input is rtmp://localhost:1935/live/game"
+        if (-not $composite) { Write-Host "mediamtx started: OBS Media Source input is rtmp://localhost:1935/live/game" }
     }
+    if ($composite) { Write-Host "composite feed: one encoder straight to $($env:TWITCH_INGEST) (the stream key is not shown)" }
     Write-Host "stream host: $($env:WORKER_URL), $($env:STREAM_WIDTH)x$($env:STREAM_HEIGHT)@$($env:STREAM_FPS), $($env:ENCODER)"
     & node $agent
 }

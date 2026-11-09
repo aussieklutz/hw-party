@@ -66,6 +66,11 @@ try {
         }
     }
 
+    # and no stream key either, in any text file (.env.example holds placeholders only)
+    foreach ($f in Get-ChildItem $dest -Recurse -Force -File -Include *.txt, *.example, *.ps1, *.bat, *.mjs, *.md, *.yml, *.json) {
+        if (Select-String -Path $f.FullName -Pattern 'live_\d{6,}_[A-Za-z0-9]{10,}' -Quiet) { throw "refusing to pack $($f.FullName): it looks like it holds a Twitch stream key" }
+    }
+
     $outDir = Split-Path -Parent ([IO.Path]::GetFullPath($Out))
     New-Item -ItemType Directory -Force -Path $outDir | Out-Null
     if (Test-Path $Out) { Remove-Item $Out -Force }
