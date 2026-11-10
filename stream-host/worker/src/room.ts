@@ -70,15 +70,16 @@ export class RoomDO extends DurableObject {
     return this.config;
   }
 
+  // loaded once per instance: every write below is mirrored to storage, and a value that is genuinely empty must not
+  // cost a storage read on every message
+  private volatileLoaded = false;
   private async replayVolatile(): Promise<void> {
-    if (this.lastState === null)
-      this.lastState = (await this.ctx.storage.get<string>("lastState")) ?? null;
-    if (this.lastTurn === null)
-      this.lastTurn = (await this.ctx.storage.get<{ team: string; sid?: string }>("lastTurn")) ?? null;
-    if (this.lastWeapons === null)
-      this.lastWeapons = (await this.ctx.storage.get<string>("lastWeapons")) ?? null;
-    if (this.lastAmmo === null)
-      this.lastAmmo = (await this.ctx.storage.get<Record<string, string>>("lastAmmo")) ?? {};
+    if (this.volatileLoaded) return;
+    this.lastState = (await this.ctx.storage.get<string>("lastState")) ?? null;
+    this.lastTurn = (await this.ctx.storage.get<{ team: string; sid?: string }>("lastTurn")) ?? null;
+    this.lastWeapons = (await this.ctx.storage.get<string>("lastWeapons")) ?? null;
+    this.lastAmmo = (await this.ctx.storage.get<Record<string, string>>("lastAmmo")) ?? {};
+    this.volatileLoaded = true;
   }
 
   private async relayView(data: ArrayBuffer): Promise<void> {
@@ -118,6 +119,14 @@ export class RoomDO extends DurableObject {
         return this.handleJoin(req);
       case "/ws":
         return this.handleWs(req);
+      case "/status": {
+        // for a phone that comes back with its session cookie: is there a room to go back to, and is a host there?
+        const config = await this.configNow();
+        if (!config || config.state === "ended") return new Response("no such room", { status: 404 });
+        await this.replayVolatile();
+        const hostHere = this.ctx.getWebSockets().some((w) => (w.deserializeAttachment() as WsMeta).role === "host");
+        return Response.json({ ok: true, mode: config.mode, state: this.lastState, hostHere });
+      }
       case "/release":
         // the round is over: every registered controller goes back to the
         // stream queue (their webapp re-joins with a fresh position). Storing
@@ -258,7 +267,12 @@ export class RoomDO extends DurableObject {
         );
       }
     } else {
-      pair[1].send(JSON.stringify({ type: "hello", role: meta.role, room: claims.room, mode: config.mode, sid: meta.sid }));
+      // a phone coming back (a closed tab, a reload) is told what it had registered, so it need not do it again
+      const mine = (await this.roster())[meta.sid];
+      pair[1].send(JSON.stringify({
+        type: "hello", role: meta.role, room: claims.room, mode: config.mode, sid: meta.sid,
+        ...(mine ? { mine: { config: mine.config, ...(mine.seat ? { seat: mine.seat } : {}) } } : {}),
+      }));
       if (this.lastState) pair[1].send(JSON.stringify({ type: "state", state: this.lastState, mode: config.mode }));
       if (this.lastTurn)
         pair[1].send(JSON.stringify({ type: "turn", team: this.lastTurn.team, ...(this.lastTurn.sid ? { sid: this.lastTurn.sid } : {}) }));

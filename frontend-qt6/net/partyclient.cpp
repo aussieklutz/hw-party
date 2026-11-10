@@ -235,6 +235,15 @@ void PartyClient::sendWeapons(const QString &ammoStore) {
       QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact)));
 }
 
+void PartyClient::sendAmmo(const QString &sid, const QString &ammo) {
+  QJsonObject obj;
+  obj.insert(QStringLiteral("type"), QStringLiteral("ammo"));
+  obj.insert(QStringLiteral("sid"), sid);
+  obj.insert(QStringLiteral("ammo"), ammo);
+  m_ws.sendTextMessage(
+      QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact)));
+}
+
 void PartyClient::sendNotify(const QString &sid, const QString &text) {
   QJsonObject obj;
   obj.insert(QStringLiteral("type"), QStringLiteral("notify"));

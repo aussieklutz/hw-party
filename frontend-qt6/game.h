@@ -105,6 +105,9 @@ class HWGame : public TCPBase {
   void TrainingStateChanged(int);
   void SendConsoleCommand(const QString &command);
   void TurnTeamChanged(const QString &teamName, int hogIndex);
+  // party mode: the active team's ammo, a count and the turns to wait for each
+  // weapon (120 characters, see the engine's SendAmmoView)
+  void AmmoView(const QString &ammo);
   // imposter mode: the engine swapped a team's lone traitor onto the survivors
   // (the team they LEFT)
   void TraitorSwapped(const QString &fromTeam);

@@ -45,6 +45,8 @@ class PartyClient : public QObject {
   void sendTurn(const QString &team, int hogIndex = -1,
                 const QString &sid = QString());
   void sendWeapons(const QString &ammoStore);
+  // the active player's ammo counts and turns to wait, to that one phone
+  void sendAmmo(const QString &sid, const QString &ammo);
   // private messages to ONE phone (the room routes them by sid): the imposter
   // reveal, "you are seated on Red / waiting for a partner"
   void sendNotify(const QString &sid, const QString &text);
