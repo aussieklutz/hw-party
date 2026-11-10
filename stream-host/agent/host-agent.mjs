@@ -21,12 +21,14 @@ import net from "node:net";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import os, { tmpdir } from "node:os";
 import { join } from "node:path";
 import { filterName } from "./safewords.mjs";
 import { videoInit, videoSetPhase, videoEngineArgs } from "./video.mjs";
 import { setFeedPhase } from "./feed.mjs";
 import { tapStart } from "./tap.mjs";
+import { compositeEnabled, compositeStart } from "./composite.mjs";
+import { startHogView } from "./hogview.mjs";
 import { Lobby } from "./layout.mjs";
 import { frame, xyFrame } from "./frames.mjs";
 
@@ -483,6 +485,9 @@ function handleEngineFrame(p) {
       imp.defected = true;
       log(`imposter ${imp.name} defected from ${from}`);
     }
+  } else if (c === 0x56 /* V — the active team's ammo: a count and the turns to wait per weapon, tick suffix stripped */) {
+    // only the player whose turn it is gets it (the room keeps the latest for a tab that connects later)
+    if (activeSid) send({ type: "ammo", sid: activeSid, ammo: p.toString("latin1", 1, p.length - 2) });
   } else if (c === 0x71 /* q */) {
     log("engine quit");
   } else if (process.env.AGENT_TRACE) {
@@ -504,6 +509,11 @@ function spawnEngine(port) {
     stdio: ["ignore", "pipe", "pipe"],
     env: tap ? { ...process.env, ...tap.env } : process.env,
   });
+  // in composite mode the agent and its ffmpeg run at high priority: the engine, whose audio thread has to wake up on
+  // time every ~90 ms, must not be the one that loses to them (it produced only 91% of the audio when it did)
+  if (tap && process.env.FEED_MODE === "composite" && process.env.FEED_PRIORITY !== "normal") {
+    try { os.setPriority(proc.pid, os.constants.priority.PRIORITY_HIGH); } catch (e) { log("could not raise the engine's priority:", e.message); }
+  }
   proc.stdout.on("data", (d) => process.stdout.write(`[engine] ${d}`));
   proc.stderr.on("data", (d) => process.stderr.write(`[engine] ${d}`));
   proc.on("exit", (code) => {
@@ -1074,6 +1084,25 @@ async function main() {
     process.exit(1);
   }
   await videoInit();
+  if (compositeEnabled) {
+    // one encoder for the whole session: the engine connects to the agent's ports for every game
+    if (process.env.STREAM_TAP !== "1") { console.error("FEED_MODE=composite needs STREAM_TAP=1"); process.exit(2); }
+    const comp = await compositeStart();
+    // a close-up of the active hog for the active player's phone only (HOG_VIEW=0 turns it off)
+    const hogView = process.env.HOG_VIEW === "0" ? null : startHogView({
+      ffmpeg: process.env.FFMPEG_BIN ?? "ffmpeg",
+      frameW: Number(process.env.STREAM_WIDTH ?? 1920), frameH: Number(process.env.STREAM_HEIGHT ?? 1080),
+      getFrame: comp.latestFrame, getTarget: () => activeSid, getHint: comp.latestHint, log,
+      onJpeg(sid, jpeg) {
+        if (!ws || ws.readyState !== 1 || ws.bufferedAmount > 256 * 1024) return;
+        const id = Buffer.from(sid);
+        ws.send(Buffer.concat([Buffer.from([id.length]), id, jpeg]));
+      },
+    });
+    const bye = () => { hogView?.stop(); comp.stop().finally(() => process.exit(0)); };
+    process.on("SIGINT", bye);
+    process.on("SIGTERM", bye);
+  }
 
   for (;;) {
     // slate: the slides cycle (commentary -> scoreboard -> how-to-play) while

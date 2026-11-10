@@ -55,7 +55,7 @@ procedure InitAudioTap;
 procedure freeModule;
 
 implementation
-uses SysUtils, uVariables, uConsts, GLunit, SDLh, uConsole, uUtils;
+uses SysUtils, uVariables, uConsts, GLunit, SDLh, uConsole, uUtils, uFloat, uTypes;
 
 const
     GL_BGRA_FORMAT = $80E1;
@@ -109,7 +109,8 @@ type
     TFramebufferTexture2D = procedure(target, attachment, textarget, texture: LongWord; level: LongInt); cdecl;
     TCheckFramebufferStatus = function(target: LongWord): LongWord; cdecl;
 
-var videoSock, audioSock: PTCPSocket;
+var videoSock, audioSock, hintSock: PTCPSocket;
+    hintCounter: LongInt;
     frameBuffer: PByte;
     frameSize: LongInt;
     frameWidth, frameHeight: LongInt;
@@ -171,6 +172,39 @@ var videoSock, audioSock: PTCPSocket;
     statRead, statMap, statSend: QWord;
     statStart: QWord;
 
+{$IFDEF WINDOWS}
+function LoadLibraryA(name: PChar): PtrUInt; stdcall; external 'kernel32.dll' name 'LoadLibraryA';
+function GetProcAddress(lib: PtrUInt; name: PChar): Pointer; stdcall; external 'kernel32.dll' name 'GetProcAddress';
+function GetCurrentProcess: PtrUInt; stdcall; external 'kernel32.dll' name 'GetCurrentProcess';
+function timeBeginPeriod(period: LongWord): LongWord; stdcall; external 'winmm.dll' name 'timeBeginPeriod';
+{$ENDIF}
+
+// The engine of a stream has a window nobody sees, and from Windows 11 a process like that has its timer
+// resolution request ignored: every wait rounds up to the 15.6 ms tick. The game loop waits with
+// SDL_Delay(1) between frames (so it ran at about 32 frames a second) and the dummy audio driver sleeps per
+// buffer (so only three quarters of the audio was ever produced). Ask for 1 ms and opt out of the throttling.
+procedure FastTimers;
+{$IFDEF WINDOWS}
+type TSetProcessInformation = function(proc: PtrUInt; infoClass: LongInt; info: Pointer; size: LongWord): LongInt; stdcall;
+var f: TSetProcessInformation;
+    state: array[0..2] of LongWord;
+{$ENDIF}
+begin
+{$IFDEF WINDOWS}
+    timeBeginPeriod(1);
+    f:= TSetProcessInformation(GetProcAddress(LoadLibraryA('kernel32.dll'), 'SetProcessInformation'));
+    if f <> nil then
+        begin
+        // PROCESS_POWER_THROTTLING_STATE: version 1, control IGNORE_TIMER_RESOLUTION (4), state 0 = not throttled
+        state[0]:= 1;
+        state[1]:= 4;
+        state[2]:= 0;
+        f(GetCurrentProcess, 4, @state, SizeOf(state))
+        end;
+    WriteLnToConsole('Timers: 1 ms resolution requested')
+{$ENDIF}
+end;
+
 function OpenSocket(port: LongInt): PTCPSocket;
 var ipaddr: TIPAddress;
     startTime: LongWord;
@@ -197,6 +231,7 @@ begin
     if connected then
         exit;
     connected:= true;
+    FastTimers;
 
     if cStreamAudioPort <> 0 then
         begin
@@ -219,6 +254,17 @@ begin
         WriteToConsole('Frame tap: connecting to port ' + IntToStr(cStreamVideoPort) + ' ');
         videoSock:= OpenSocket(cStreamVideoPort);
         if videoSock = nil then
+            WriteLnToConsole(msgFailed)
+        else
+            WriteLnToConsole(msgOK)
+        end;
+
+    // where the active hedgehog is on screen, for a viewer that wants a close-up (optional)
+    if cStreamHintPort <> 0 then
+        begin
+        WriteToConsole('Hint tap: connecting to port ' + IntToStr(cStreamHintPort) + ' ');
+        hintSock:= OpenSocket(cStreamHintPort);
+        if hintSock = nil then
             WriteLnToConsole(msgFailed)
         else
             WriteLnToConsole(msgOK)
@@ -727,6 +773,43 @@ begin
         end
 end;
 
+// Where the active hedgehog and its target are on the screen, in the pixels of the frame that is being
+// sent (top row first): five little endian 32 bit integers, flags (1 hedgehog, 2 cursor in use), hog x, hog y,
+// cursor x, cursor y. About 20 a second. A consumer that stops reading only costs this socket.
+procedure SendHint;
+var rec: array[0..4] of LongInt;
+    k: Double;
+begin
+    if hintSock = nil then
+        exit;
+    inc(hintCounter);
+    if hintCounter mod 3 <> 0 then
+        exit;
+    FillChar(rec, SizeOf(rec), 0);
+    // cScaleFactor is 2 with no zoom, where world + (WorldDx, WorldDy) is already a screen position
+    // (x counted from the middle of the screen)
+    k:= cScaleFactor / 2;
+    if (CurrentHedgehog <> nil) and (CurrentHedgehog^.Gear <> nil) then
+        begin
+        rec[0]:= 1;
+        rec[1]:= round(cScreenWidth / 2 + (hwRound(CurrentHedgehog^.Gear^.X) + WorldDx) * k);
+        rec[2]:= round(cScreenHeight / 2 + (hwRound(CurrentHedgehog^.Gear^.Y) + WorldDy - cScreenHeight / 2) * k)
+        end;
+    // the cursor, while a weapon that is aimed with it is selected: CursorPoint is in the units the camera uses
+    // (x from the middle of the screen, y counted up from the bottom), one unit being k pixels
+    if isCursorVisible then
+        begin
+        rec[0]:= rec[0] or 2;
+        rec[3]:= round(cScreenWidth / 2 + CursorPoint.X * k);
+        rec[4]:= round(cScreenHeight / 2 + (cScreenHeight / 2 - CursorPoint.Y) * k)
+        end;
+    if SDLNet_TCP_Send(hintSock, @rec, SizeOf(rec)) < SizeOf(rec) then
+        begin
+        SDLNet_TCP_Close(hintSock);
+        hintSock:= nil
+        end
+end;
+
 procedure TapFrame;
 begin
     if (cStreamVideoPort = 0) or tapFailed then
@@ -764,6 +847,7 @@ begin
     end;
     if tapNV12 then
         EndConversion;
+    SendHint;
 
     inc(statFrames);
     if showStats and (statFrames >= statsFrames) then
@@ -863,6 +947,9 @@ begin
         audioSock:= nil
         end;
     StopVideoTap;
+    if hintSock <> nil then
+        SDLNet_TCP_Close(hintSock);
+    hintSock:= nil;
     if frameBuffer <> nil then
         FreeMem(frameBuffer);
     frameBuffer:= nil

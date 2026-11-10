@@ -123,6 +123,7 @@ class HWForm : public QMainWindow {
   void PartyGameEnded();
   void PartyTraitorSwapped(const QString &fromTeam);
   void PartyTurnTeamChanged(const QString &teamName, int hogIndex);
+  void PartyAmmoView(const QString &ammo);
   void PartyInput(const QString &sid, const QString &action);
   void PartyCursor(const QString &sid, int x, int y);
   void PartyPut(const QString &sid, int x, int y);

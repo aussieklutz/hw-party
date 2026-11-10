@@ -52,6 +52,10 @@
         #cpad { grid-template-columns: repeat(4, 56px); gap: 3px; }
       }
       body.ingame #status { display: none; }
+      #hogview { display: flex; justify-content: center; margin: 0.3rem 0; }
+      #hogview[hidden] { display: none; }
+      #hogcanvas { width: min(100%, 540px); aspect-ratio: 320 / 216; background: #0d0b1e; border: 1px solid var(--hw-border); border-radius: 10px; image-rendering: auto; }
+      @media (orientation: landscape) { #hogview { position: fixed; right: 8px; top: 8px; z-index: 5; pointer-events: none; opacity: 0.9; } #hogcanvas { width: 34vw; } }
       #weaponsBtn { font-size: 1.2rem; }
       #weaponspanel { position: fixed; inset: 0; background: rgba(16,16,34,0.97); display: none; flex-direction: column; padding: 8px; z-index: 10; }
       #weaponspanel.open { display: flex; }
@@ -61,7 +65,10 @@
       .whalfwrap .wgrid { flex: 1; grid-template-columns: repeat(5, 1fr); }
       .wcell { background: var(--hw-panel-2); border: 1px solid var(--hw-border); border-radius: 8px; color: var(--hw-text); padding: 6px 2px 4px; display: flex; flex-direction: column; align-items: center; gap: 3px; overflow: hidden; }
       .wcell:not(.dim):active { border-color: var(--hw-accent); }
+      .wcell { position: relative; }
       .wcell.dim { opacity: 0.25; }
+      .wcount { position: absolute; top: 1px; right: 3px; font-size: 0.7rem; font-weight: bold; color: var(--hw-accent); text-shadow: 0 0 2px #000; }
+      .wcell.dim .wcount { color: var(--hw-dim); }
       .wcell.switcher { border-color: var(--hw-accent-2); }
       .wcell.noweap { border-color: var(--hw-accent); }
       .wnoweap { font-size: 1.6rem; color: var(--hw-dim); height: 32px; display: flex; align-items: center; justify-content: center; flex: none; }
@@ -84,6 +91,11 @@
     <div id="join" class="card">
       <input id="code" maxlength="6" placeholder="Room code" style="text-transform:uppercase; font-size:1.5rem" />
       <button id="joinBtn">Join</button>
+    </div>
+    <div id="takenover" class="card" hidden>
+      <h3>Taken over</h3>
+      <p>This seat is now controlled from another tab or device. You hold one seat per account, and the newest tab has it.</p>
+      <button id="takeBack" type="button">Take control here</button>
     </div>
     <div id="queueui" class="card" hidden>
       <h3>Stream queue</h3>
@@ -117,6 +129,7 @@
       <p id="rolenote" hidden style="margin:0.3rem 0;padding:6px 12px;border-radius:8px;background:#4a1020;color:#ffd7de;font-weight:bold"></p>
 
       <div id="controls" hidden>
+        <div id="hogview" hidden><canvas id="hogcanvas"></canvas></div>
         <div class="padgroup" id="pgroup-pointer">
           <div class="padlabel">Pointer</div>
           <div id="cpad">
@@ -136,6 +149,9 @@
         </div>
         <div class="hrow">
           <button id="fire">Fire (hold)</button><button id="weaponsBtn" disabled>Weapons</button>
+        </div>
+        <div class="hrow">
+          <button id="viewBtn" type="button">Close-up: on</button>
         </div>
       </div>
     </div>
@@ -167,7 +183,15 @@
       let inRoom = false;
       let queued = false;
       let teamSaved = false;
-      let savedTeamConfig = null;
+      // what a closed tab loses: the team the player built (the seat itself is held by the session cookie and the queue)
+      function loadSavedTeam() {
+        try { const t = JSON.parse(localStorage.getItem("hw_team") ?? "null"); return t && typeof t.name === "string" ? t : null; } catch { return null; }
+      }
+      function rememberTeam(config) { try { localStorage.setItem("hw_team", JSON.stringify(config)); } catch {} }
+      let savedTeamConfig = loadSavedTeam();
+      if (savedTeamConfig && Array.isArray(savedTeamConfig.hogs)) {
+        savedTeamConfig.hogs.forEach((h, i) => { const el = document.getElementById("hog" + i); if (el && h && h.name) el.value = h.name; });
+      }
       if (!code) {
         queueCard.hidden = false;
         joinCard.hidden = true;
@@ -301,7 +325,10 @@
             const iv = setInterval(() => { tick(); if (Date.now() >= m.endsAt) clearInterval(iv); }, 1000);
           }
         };
-        queueWs.onclose = () => setTimeout(joinQueue, 2000);
+        queueWs.onclose = (e) => {
+          if (e.code === 4000) { takenOver(); return; }   // another tab or device took the seat: do not fight for it
+          setTimeout(joinQueue, 2000);
+        };
       }
       document.getElementById("queueBtn").onclick = joinQueue;
 
@@ -333,7 +360,9 @@
               send({ type: "team", config: savedTeamConfig });
               myTeam = savedTeamConfig.name;
               teamformEl.hidden = true;
-              activeEl.textContent = "team registered — waiting for game";
+              // a tab that joins a game in progress (a resumed or taken-over seat) already has "YOUR TURN" or the
+              // current turn written there: only say this before the game
+              if (!document.body.classList.contains("ingame")) activeEl.textContent = "team registered — waiting for game";
             }
           }, 100);
         }
@@ -345,6 +374,24 @@
       let myMode = "classic";
       let myTeam = "";
       let ammoStore = "";
+      let ammoLive = null, controlsOn = false;
+      // 60 x (count '0'-'8', '9' = nine or more, '*' = infinite; turns still to wait '0'-'9')
+      function parseAmmo(s) {
+        const cnt = [], wait = [];
+        for (let i = 0; i < 60; i++) { cnt.push(s[i * 2] || "0"); wait.push(Number(s[i * 2 + 1]) || 0); }
+        return { cnt, wait };
+      }
+      // can this weapon be used now, and what to write on it
+      function weaponState(w) {
+        if (ammoLive) {
+          const c = ammoLive.cnt[w - 1] || "0", wait = ammoLive.wait[w - 1] || 0;
+          if (c === "0") return { usable: false, badge: "0" };
+          if (wait > 0) return { usable: false, badge: "in " + wait };
+          return { usable: true, badge: c === "*" ? "\u221e" : c === "9" ? "9+" : c };
+        }
+        const a = ammoStore[w - 1] || "0";
+        return { usable: a !== "0", badge: "" };
+      }
       let backoff = 1500;
       let pingTimer = null;
       const bannerEl = document.createElement("div");
@@ -396,12 +443,17 @@
             myTeam = savedTeamConfig.name;
           }
         };
-        ws.onclose = () => {
+        const sock = ws;
+        ws.onclose = (e) => {
+          if (ws !== sock) return;                          // an older socket closing
+          if (e.code === 4000) { takenOver(); return; }     // another tab or device took the seat
           statusEl.textContent = "disconnected — retryingâ€¦";
           setTimeout(connect, backoff);
           backoff = Math.min(backoff * 2, 5000);
         };
+        ws.binaryType = "arraybuffer";
         ws.onmessage = (e) => {
+          if (typeof e.data !== "string") { drawHogView(e.data); return; }   // the host's close-up of the active hog
           const msg = JSON.parse(e.data);
           if (msg.type === "hello") {
             if (msg.sid) mySid = msg.sid;
@@ -445,7 +497,12 @@
             else if (!code) joinQueue();
           } else if (msg.type === "weapons") {
             ammoStore = msg.ammo || "";
-            weaponsBtn.disabled = false;
+            weaponsBtn.disabled = !controlsOn;
+            renderWeapons();
+          } else if (msg.type === "ammo") {
+            // the engine's view for the player whose turn it is: a count and the turns to wait for each weapon
+            ammoLive = parseAmmo(msg.ammo || "");
+            weaponsBtn.disabled = !controlsOn;
             renderWeapons();
           } else if (msg.type === "turn") {
             const mine = msg.sid != null
@@ -453,6 +510,8 @@
               : (myTeam && msg.team === myTeam);
             activeEl.textContent = mine ? "YOUR TURN" : `turn: ${msg.team}`;
             setControlsEnabled(!!mine);
+            hogViewMine = !!mine;
+            if (!mine) hideHogView();
             // heartbeat: the host pauses the game and counts down when a
             // sleeping phone stops pinging (buglist: player AFK countdown)
             clearInterval(pingTimer);
@@ -548,10 +607,37 @@
         } catch {}
       }
 
+      // the close-up: small JPEG frames the host sends only to the player whose turn it is
+      const hogViewEl = document.getElementById("hogview");
+      const hogCanvas = document.getElementById("hogcanvas");
+      const viewBtn = document.getElementById("viewBtn");
+      let hogViewMine = false, hogViewOn = localStorage.getItem("hogview") !== "off", hogSeq = 0;
+      const syncViewBtn = () => { viewBtn.textContent = hogViewOn ? "Close-up: on" : "Close-up: off"; };
+      function hideHogView() { hogViewEl.hidden = true; hogSeq++; }
+      async function drawHogView(data) {
+        if (!hogViewOn || !hogViewMine) return;
+        const seq = ++hogSeq;
+        let bmp;
+        try { bmp = await createImageBitmap(new Blob([data], { type: "image/jpeg" })); } catch { return; }
+        if (seq !== hogSeq) { bmp.close(); return; }   // a newer frame is already on its way: draw only the latest
+        if (hogCanvas.width !== bmp.width) { hogCanvas.width = bmp.width; hogCanvas.height = bmp.height; }
+        hogCanvas.getContext("2d").drawImage(bmp, 0, 0);
+        bmp.close();
+        hogViewEl.hidden = false;
+      }
+      viewBtn.onclick = () => {
+        hogViewOn = !hogViewOn;
+        localStorage.setItem("hogview", hogViewOn ? "on" : "off");
+        syncViewBtn();
+        if (!hogViewOn) hideHogView();
+      };
+      syncViewBtn();
+
       function setControlsEnabled(enabled) {
         padBtns.forEach((b) => (b.disabled = !enabled));
         fireBtn.disabled = !enabled;
-        weaponsBtn.disabled = !enabled || !ammoStore;
+        controlsOn = enabled;
+        weaponsBtn.disabled = !enabled || (!ammoStore && !ammoLive);
       }
 
       function send(obj) {
@@ -687,8 +773,8 @@
         const cell = document.createElement("button");
         const name = nameByAmmo.get(w) || "?";
         cell.className = "wcell" + (name === "Switch Hedgehog" ? " switcher" : "");
-        const availChar = ammoStore[w - 1] || "0";
-        if (availChar === "0") cell.classList.add("dim");
+        const st = weaponState(w);
+        if (!st.usable) cell.classList.add("dim");
         const icon = document.createElement("div");
         icon.className = "wicon";
         const frame = w - 1;
@@ -699,7 +785,14 @@
         label.className = "wname";
         label.textContent = name;
         cell.appendChild(label);
+        if (st.badge) {
+          const count = document.createElement("span");
+          count.className = "wcount";
+          count.textContent = st.badge;
+          cell.appendChild(count);
+        }
         cell.onclick = () => {
+          if (!st.usable) return;   // none left, or not available yet
           send({ type: "input", action: "setweap " + String.fromCharCode(w) });
         };
         return cell;
@@ -749,6 +842,7 @@
         const config = buildTeamConfig();
         if (!config) return;
         savedTeamConfig = config;
+        rememberTeam(config);
         if (queued) {
           // pre-building while queued: the queue stores it; admission
           // registers it automatically
@@ -772,6 +866,33 @@
         connect();
         if (teamData && !teamformEl.hidden) playVoiceSample();
       };
+
+      // ---- one seat per account: the newest tab takes it ----
+      const takenoverEl = document.getElementById("takenover");
+      function takenOver() {
+        try { if (ws) { ws.onclose = null; ws.close(); } } catch {}
+        try { if (queueWs) { queueWs.onclose = null; queueWs.close(); } } catch {}
+        inRoom = false; entering = false;
+        clearInterval(pingTimer);
+        hideHogView();
+        document.getElementById("game").hidden = true;
+        queueCard.hidden = true;
+        joinCard.hidden = true;
+        takenoverEl.hidden = false;
+      }
+      document.getElementById("takeBack").onclick = () => { takenoverEl.hidden = true; resumeSeat(); };
+
+      // On load, and when asked to take control again: a closed tab or a second tab still has its cookie (or its account),
+      // so the queue says whether there is a seat to pick up, in the line or in the round that is running.
+      async function resumeSeat() {
+        try {
+          const r = await (await fetch("/api/queue/resume", { cache: "no-store" })).json();
+          if (r.state === "queued") { queueCard.hidden = false; joinCard.hidden = true; await joinQueue(); }
+          else if (r.state === "admitted" && r.room) { await enterRoom(r.room); }
+          else { queueCard.hidden = false; }
+        } catch { queueCard.hidden = false; }
+      }
+      if (!code) resumeSeat();
     </script>
   </body>
 </html>

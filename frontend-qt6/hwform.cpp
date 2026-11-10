@@ -2327,6 +2327,13 @@ void HWForm::PartyTurnTeamChanged(const QString &teamName, int hogIndex) {
     startPartyAfkWatch(teamName, m_partyActiveSid);
 }
 
+void HWForm::PartyAmmoView(const QString &ammo) {
+  // the engine sends this right after the turn notice, so m_partyActiveSid is
+  // already the player whose turn it is; only that phone gets it
+  if (!partyClient || m_partyActiveSid.isEmpty() || ammo.size() != 120) return;
+  partyClient->sendAmmo(m_partyActiveSid, ammo);
+}
+
 void HWForm::PartyTraitorSwapped(const QString &fromTeam) {
   if (m_partyCore) m_partyCore->traitorSwapped(fromTeam);
 }
@@ -2595,6 +2602,7 @@ void HWForm::CreateGame(GameCFGWidget *gamecfg, TeamSelWidget *pTeamSelWidget,
           &HWForm::PartyTurnTeamChanged);
   connect(game.data(), &HWGame::TraitorSwapped, this,
           &HWForm::PartyTraitorSwapped);
+  connect(game.data(), &HWGame::AmmoView, this, &HWForm::PartyAmmoView);
   m_lastDemo.clear();
 }
 

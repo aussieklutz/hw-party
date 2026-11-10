@@ -91,6 +91,20 @@ export default {
       });
     }
 
+    // A phone that closed its tab and comes back still has its session cookie: this says which room it
+    // belongs to, and whether that room is still running with a host in it (then the page resumes the
+    // seat without a code). 204 when there is nothing to go back to.
+    if (url.pathname === "/api/session" && req.method === "GET") {
+      const claims = await getSession(req, env.PARTY_JWT_SECRET);
+      if (!claims || claims.role !== "controller") return new Response(null, { status: 204 });
+      const res = await roomStub(env, claims.room).fetch("https://room/status");
+      if (!res.ok) return new Response(null, { status: 204 });
+      const status = await res.json<Record<string, unknown>>();
+      return new Response(JSON.stringify({ room: claims.room, ...status }), {
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      });
+    }
+
     if (url.pathname === "/api/rooms" && req.method === "POST") {
       const sid = crypto.randomUUID();
       const body = await req

@@ -64,6 +64,7 @@ var
     cOnlyStats         : boolean;
     cStreamVideoPort   : LongInt;
     cStreamAudioPort   : LongInt;
+    cStreamHintPort    : LongInt;
     cHiddenWindow      : boolean;
 {$IFDEF USE_VIDEO_RECORDING}
     RecPrefix          : shortstring;
@@ -2750,6 +2751,7 @@ begin
     cOnlyStats      := False;
     cStreamVideoPort:= 0;
     cStreamAudioPort:= 0;
+    cStreamHintPort := 0;
     cHiddenWindow   := False;
     cScriptName     := '';
     cScriptParam    := '';

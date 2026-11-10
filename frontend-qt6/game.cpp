@@ -500,6 +500,9 @@ void HWGame::ParseMessage(const QByteArray &msg) {
         sendCampaignVar(msg.right(msg.size() - 3));
       else if (msg.at(2) == '!')
         writeCampaignVar(msg.right(msg.size() - 3));
+      else
+        // party mode: what the active team can use (the engine's SendAmmoView)
+        Q_EMIT AmmoView(QString::fromLatin1(msg.mid(2).left(msg.size() - 4)));
       break;
     }
     case 'v': {

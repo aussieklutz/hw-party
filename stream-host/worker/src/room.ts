@@ -35,7 +35,14 @@ function capForRoom(config: { mode: PartyMode; slots?: number; maxPlayers?: numb
 }
 
 const MAX_TEAM_NAME = 40;
+// a socket that has just been closed (replaced by a newer tab) throws when sent to: that must never
+// stop the message reaching the others
+function safeSend(ws: WebSocket, data: string | ArrayBuffer): void {
+  try { ws.send(data); } catch { /* closing */ }
+}
+
 const MAX_INPUT = 256;
+const VIEW_MAX = 96 * 1024; // one close-up frame (a small JPEG), host -> the active player
 
 const INPUT_RE = /^(\+[a-z]+|\-[a-z]+|(?:p|P)\s+-?\d+\s+-?\d+|[1-5]|[jJstZz]|slot\s+\d+|setweap\s+[\x01-\x7e])$/;
 const TEXT_RE = /^[\x20-\x7e]{0,100}$/;
@@ -50,6 +57,8 @@ export class RoomDO extends DurableObject {
   private config?: RoomConfig;
   private lastTurn: { team: string; sid?: string } | null = null;
   private lastState: string | null = null;
+  private lastWeapons: string | null = null;          // the game's starting ammo store, for a tab that connects later
+  private lastAmmo: Record<string, string> | null = null; // sid -> the ammo view the host last sent that player
   private lastPing: Record<string, number> = {}; // sid -> ms, controller heartbeats
 
   // Durable Objects hibernate between messages: in-memory fields (this.config,
@@ -61,11 +70,31 @@ export class RoomDO extends DurableObject {
     return this.config;
   }
 
+  // loaded once per instance: every write below is mirrored to storage, and a value that is genuinely empty must not
+  // cost a storage read on every message
+  private volatileLoaded = false;
   private async replayVolatile(): Promise<void> {
-    if (this.lastState === null)
-      this.lastState = (await this.ctx.storage.get<string>("lastState")) ?? null;
-    if (this.lastTurn === null)
-      this.lastTurn = (await this.ctx.storage.get<{ team: string; sid?: string }>("lastTurn")) ?? null;
+    if (this.volatileLoaded) return;
+    this.lastState = (await this.ctx.storage.get<string>("lastState")) ?? null;
+    this.lastTurn = (await this.ctx.storage.get<{ team: string; sid?: string }>("lastTurn")) ?? null;
+    this.lastWeapons = (await this.ctx.storage.get<string>("lastWeapons")) ?? null;
+    this.lastAmmo = (await this.ctx.storage.get<Record<string, string>>("lastAmmo")) ?? {};
+    this.volatileLoaded = true;
+  }
+
+  private async relayView(data: ArrayBuffer): Promise<void> {
+    if (data.byteLength < 8 || data.byteLength > VIEW_MAX) return;
+    const bytes = new Uint8Array(data);
+    const n = bytes[0];
+    if (n === 0 || 1 + n >= bytes.length) return;
+    const sid = new TextDecoder().decode(bytes.subarray(1, 1 + n));
+    await this.replayVolatile();
+    if (!this.lastTurn?.sid || this.lastTurn.sid !== sid) return;
+    const jpeg = data.slice(1 + n);
+    for (const cws of this.ctx.getWebSockets()) {
+      const cmeta = cws.deserializeAttachment() as WsMeta;
+      if (cmeta.role === "controller" && cmeta.sid === sid) safeSend(cws, jpeg);
+    }
   }
 
   private async roster(): Promise<Record<string, RoomRosterEntry>> {
@@ -90,6 +119,14 @@ export class RoomDO extends DurableObject {
         return this.handleJoin(req);
       case "/ws":
         return this.handleWs(req);
+      case "/status": {
+        // for a phone that comes back with its session cookie: is there a room to go back to, and is a host there?
+        const config = await this.configNow();
+        if (!config || config.state === "ended") return new Response("no such room", { status: 404 });
+        await this.replayVolatile();
+        const hostHere = this.ctx.getWebSockets().some((w) => (w.deserializeAttachment() as WsMeta).role === "host");
+        return Response.json({ ok: true, mode: config.mode, state: this.lastState, hostHere });
+      }
       case "/release":
         // the round is over: every registered controller goes back to the
         // stream queue (their webapp re-joins with a fresh position). Storing
@@ -196,6 +233,7 @@ export class RoomDO extends DurableObject {
     if (claims.role !== "host" && this.countControllers(claims.sid) >= capForRoom(config)) {
       return new Response("room full", { status: 409 });
     }
+    await this.replayVolatile();
     const pair = new WebSocketPair();
     const meta: WsMeta = { sid: claims.sid, role: claims.role, team: claims.team };
     this.ctx.acceptWebSocket(pair[1]);
@@ -229,10 +267,20 @@ export class RoomDO extends DurableObject {
         );
       }
     } else {
-      pair[1].send(JSON.stringify({ type: "hello", role: meta.role, room: claims.room, mode: config.mode, sid: meta.sid }));
+      // a phone coming back (a closed tab, a reload) is told what it had registered, so it need not do it again
+      const mine = (await this.roster())[meta.sid];
+      pair[1].send(JSON.stringify({
+        type: "hello", role: meta.role, room: claims.room, mode: config.mode, sid: meta.sid,
+        ...(mine ? { mine: { config: mine.config, ...(mine.seat ? { seat: mine.seat } : {}) } } : {}),
+      }));
       if (this.lastState) pair[1].send(JSON.stringify({ type: "state", state: this.lastState, mode: config.mode }));
       if (this.lastTurn)
         pair[1].send(JSON.stringify({ type: "turn", team: this.lastTurn.team, ...(this.lastTurn.sid ? { sid: this.lastTurn.sid } : {}) }));
+      // a tab that takes a seat over (or comes back) needs the weapons too: the game's ammo store, then this player's
+      // latest ammo view (counts and turns to wait)
+      if (this.lastWeapons) pair[1].send(JSON.stringify({ type: "weapons", ammo: this.lastWeapons }));
+      const mineAmmo = this.lastAmmo?.[meta.sid];
+      if (mineAmmo) pair[1].send(JSON.stringify({ type: "ammo", ammo: mineAmmo }));
       this.broadcast({ type: "joined", sid: meta.sid }, "host");
     }
     return new Response(null, { status: 101, webSocket: pair[0] });
@@ -256,7 +304,13 @@ export class RoomDO extends DurableObject {
   }
 
   override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    if (typeof message !== "string") return;
+    if (typeof message !== "string") {
+      // the host's close-up of the active hog: [sid length][sid][jpeg], relayed to that one player's phone
+      // and only while it is their turn
+      const host = ws.deserializeAttachment() as WsMeta;
+      if (host.role === "host") await this.relayView(message);
+      return;
+    }
     if (message.length > MAX_INPUT * 4) return;
     const meta = ws.deserializeAttachment() as WsMeta;
     if (meta.role !== "host" && !this.allow(meta.sid)) return;
@@ -271,6 +325,7 @@ export class RoomDO extends DurableObject {
       team?: unknown;
       state?: unknown;
       config?: unknown;
+      ammo?: unknown;
     };
     try {
       msg = JSON.parse(message);
@@ -284,7 +339,7 @@ export class RoomDO extends DurableObject {
         // through /alive/<sid> and counts an AFK player down before skipping
         if (meta.role === "controller") {
           this.lastPing[meta.sid] = Date.now();
-          ws.send(JSON.stringify({ type: "pong" }));
+          safeSend(ws, JSON.stringify({ type: "pong" }));
         }
         return;
       case "input":
@@ -397,21 +452,28 @@ export class RoomDO extends DurableObject {
       }
       case "notify":
       case "seat":
+      case "ammo":
       case "release":
         // host -> ONE controller (the imposter reveal, "you are seated on Red /
         // waiting for a partner", "back to the queue"): routed by sid so no
         // other phone ever sees it
         if (meta.role !== "host" || typeof msg.sid !== "string") return;
+        if (msg.type === "ammo") {
+          // the active player's ammo view: 60 x (count, turns to wait). Kept so a tab that connects later has it
+          if (typeof msg.ammo !== "string" || msg.ammo.length > 200) return;
+          this.lastAmmo = { ...(this.lastAmmo ?? {}), [msg.sid]: msg.ammo };
+          await this.ctx.storage.put("lastAmmo", this.lastAmmo);
+        }
         for (const cws of this.ctx.getWebSockets()) {
           const cmeta = cws.deserializeAttachment() as WsMeta;
           if (cmeta.role !== "controller" || cmeta.sid !== msg.sid) continue;
           if (msg.type === "release") {
             // the page answers "released" by rejoining the queue
-            cws.send(JSON.stringify({ type: "state", state: "released" }));
+            safeSend(cws, JSON.stringify({ type: "state", state: "released" }));
             cws.close(4001, "released");
           } else {
             const { type, sid, ...rest } = msg;
-            cws.send(JSON.stringify({ type: msg.type, ...rest }));
+            safeSend(cws, JSON.stringify({ type: msg.type, ...rest }));
           }
         }
         return;
@@ -429,6 +491,10 @@ export class RoomDO extends DurableObject {
             : null;
           await this.ctx.storage.put("lastTurn", this.lastTurn);
         }
+        if (msg.type === "weapons" && typeof msg.ammo === "string" && msg.ammo.length <= 200) {
+          this.lastWeapons = msg.ammo;
+          await this.ctx.storage.put("lastWeapons", this.lastWeapons);
+        }
         if (msg.type === "state" && typeof msg.state === "string") {
           this.lastState = msg.state;
           await this.ctx.storage.put("lastState", this.lastState);
@@ -437,6 +503,9 @@ export class RoomDO extends DurableObject {
           if (msg.state !== "ingame") {
             this.lastTurn = null;
             await this.ctx.storage.put("lastTurn", this.lastTurn);
+            this.lastWeapons = null; this.lastAmmo = {};
+            await this.ctx.storage.delete("lastWeapons");
+            await this.ctx.storage.delete("lastAmmo");
           }
         }
         if (msg.type === "state" && config) {
@@ -497,7 +566,7 @@ export class RoomDO extends DurableObject {
   private relayToHost(msg: unknown): void {
     for (const hws of this.ctx.getWebSockets()) {
       const meta = hws.deserializeAttachment() as WsMeta;
-      if (meta.role === "host") hws.send(JSON.stringify(msg));
+      if (meta.role === "host") safeSend(hws, JSON.stringify(msg));
     }
   }
 
@@ -505,7 +574,7 @@ export class RoomDO extends DurableObject {
     const data = JSON.stringify(msg);
     for (const ws of this.ctx.getWebSockets()) {
       const meta = ws.deserializeAttachment() as WsMeta;
-      if (meta.role === to) ws.send(data);
+      if (meta.role === to) safeSend(ws, data);
     }
   }
 }

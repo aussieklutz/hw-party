@@ -40,8 +40,18 @@ npm run deploy
 - host → DO: `{type:'turn', team, yourTeam}`, `{type:'state'}`, `{type:'roster'}`
 - DO → host: `{type:'input', team, sid, action}` (input routed to host only)
 - DO → clients: `{type:'hello'}`, `{type:'joined'|'left', sid}`
-- host → ONE client (routed by sid): `{type:'notify', sid, text}`, `{type:'seat', sid, seated, team}`, `{type:'release', sid}`
+- host → ONE client (routed by sid): `{type:'notify', sid, text}`, `{type:'seat', sid, seated, team}`, `{type:'release', sid}`,
+  `{type:'ammo', sid, ammo}` (the active player's weapons: 60 x a count `0`-`8`, `9` for nine or more, `*` for infinite,
+  then the turns still to wait `0`-`9`; the engine's `V` notice; the phone greys out what cannot be used)
 - host → all clients: `{type:'afk', team, seconds, endsAt}` (AFK countdown banner)
+
+## Coming back
+
+A phone that closes its tab and returns keeps its seat: the session cookie names the room and the player, `GET
+/api/session` says whether that room still has a host (then the page goes straight back in, no code to type), and the
+room's `hello` hands back what the phone registered. A newer tab for the same player takes the seat over: the older
+socket is closed with code 4000 and its page shows "Taken over" with a "Take control here" button instead of
+reconnecting. A tab that comes back mid-game gets the turn, the game's weapons and its latest `ammo` replayed.
 
 Only the player whose turn it is can send `input`/`cursor`/`put`; see
 `PARTY_MODES.md` (M13) for the modes (`imposter`, rebalanced `teams`) and for how

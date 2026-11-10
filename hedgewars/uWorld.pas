@@ -257,7 +257,12 @@ end;
 
 procedure InitCameraBorders;
 begin
-cGearScrEdgesDist:= min(2 * cScreenHeight div 5, 2 * cScreenWidth div 5);
+if cStreamVideoPort <> 0 then
+    // a stream has no player to move the view: keep the followed hedgehog (the active one) in the
+    // middle of the frame instead of letting it wander towards the edge before the camera moves
+    cGearScrEdgesDist:= cScreenHeight div 2
+else
+    cGearScrEdgesDist:= min(2 * cScreenHeight div 5, 2 * cScreenWidth div 5);
 end;
 
 procedure InitTouchInterface;
@@ -1962,6 +1967,12 @@ if (not (CurrentTeam^.ExtDriven and isCursorVisible and (not bShowAmmoMenu) and 
     uCursor.updatePosition();
 {$ENDIF}
 z:= round(200/zoom);
+// a stream has nobody to steer the camera: whenever nothing else holds it (a shot in flight, a cursor in use
+// for a target) it goes back to following the active hedgehog, instead of staying wherever a cursor delta
+// or the end of a shot left it
+if (cStreamVideoPort <> 0) and autoCameraOn and (FollowGear = nil) and (not isCursorVisible) and (not bShowAmmoMenu)
+   and (not PlacingHogs) and (CurrentHedgehog <> nil) and (CurrentHedgehog^.Gear <> nil) and (not CurrentHedgehog^.Unplaced) then
+    FollowGear:= CurrentHedgehog^.Gear;
 inbtwnTrgtAttks := ((GameFlags and gfInfAttack) <> 0) and (CurrentHedgehog <> nil) and ((CurrentHedgehog^.Gear = nil) or (CurrentHedgehog^.Gear <> FollowGear)) and ((Ammoz[CurrentHedgehog^.CurAmmoType].Ammo.Propz and ammoprop_NeedTarget) <> 0);
 if autoCameraOn and (not PlacingHogs) and (FollowGear <> nil) and (not isCursorVisible) and (not bShowAmmoMenu) and (not fastUntilLag) and (not inbtwnTrgtAttks) then
     if ((abs(CursorPoint.X - prevPoint.X) + abs(CursorPoint.Y - prevpoint.Y)) > 4) then

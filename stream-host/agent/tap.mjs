@@ -19,9 +19,12 @@
 //   TAP_FORMAT        nv12 | bgra: what the engine sends (default nv12: the graphics
 //                     card converts, a third of the data, nothing left to flip)
 //   TAP_FILTER        gpu | sw: where qsv converts and flips bgra frames (default gpu)
-//   TAP_VIDEO_PORT/TAP_AUDIO_PORT  local ports (default 19001/19002)
+//   STREAM_MUSIC    1 plays the game's background music on the stream (default off: it makes the audio choppy)
+//   STREAM_ZOOM     engine zoom in percent (default 150, range 50-175; 100 is the engine's own default)
+//   TAP_VIDEO_PORT/TAP_AUDIO_PORT  local ports (default 19001/19002); TAP_HINT_PORT 19003 (composite hog close-up)
 //   TAP_STATS         1 logs ffmpeg's own progress (frame rate, duplicated and dropped frames)
 //   FFMPEG_BIN        default ffmpeg
+//   FEED_MODE         composite: one ffmpeg for the whole session, see composite.mjs
 
 import { spawn } from "node:child_process";
 
@@ -38,6 +41,7 @@ const TAP_FORMAT = process.env.TAP_FORMAT ?? "nv12";
 const TAP_FILTER = process.env.TAP_FILTER ?? "gpu";
 const VIDEO_PORT = Number(process.env.TAP_VIDEO_PORT ?? 19001);
 const AUDIO_PORT = Number(process.env.TAP_AUDIO_PORT ?? 19002);
+const HINT_PORT = Number(process.env.TAP_HINT_PORT ?? 19003);
 const FFMPEG_BIN = process.env.FFMPEG_BIN ?? "ffmpeg";
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), "[tap]", ...a);
@@ -105,9 +109,41 @@ function ffmpegArgs() {
   ];
 }
 
-/** Starts the encoder for one game; null when the tap is off. */
+// the engine's side of the tap: the same arguments and environment whoever listens on the ports
+function engineSide() {
+  return {
+    engineArgs: [
+      "--stream-video-port", String(VIDEO_PORT),
+      "--stream-audio-port", String(AUDIO_PORT),
+      // composite mode with the hog close-up: the engine also reports where the active hog and its target are
+      ...(process.env.FEED_MODE === "composite" && process.env.HOG_VIEW !== "0" && process.env.HOG_VIEW_HINT !== "0"
+        ? ["--stream-hint-port", String(HINT_PORT)] : []),
+      // the engine's zoom, in percent of its normal 100 (up to 175): the stream is wider than a player's window
+      "--zoom", String(process.env.STREAM_ZOOM ?? 150),
+      // no background music unless STREAM_MUSIC=1: decoding it on the engine's mixer thread makes the engine's audio clock run
+      // about 10% slow (measured: 88-94% of real time with music, 97-99% without), which is choppy sound on the stream
+      ...(process.env.STREAM_MUSIC === "1" ? [] : ["--nomusic"]),
+      "--hidden", "--nodampen",
+      "--width", String(W), "--height", String(H),
+      "--frame-interval", String(Math.max(1, Math.floor(1000 / FPS))),
+    ],
+    // no real sound device and, off Windows, no display server either
+    env: {
+      SDL_AUDIODRIVER: "dummy",
+      ...(NV12 ? { HW_TAP_FORMAT: "nv12" } : {}),
+      ...(process.platform === "win32" ? {} : { SDL_VIDEODRIVER: "offscreen" }),
+    },
+  };
+}
+
+/**
+ * Starts the encoder for one game; null when the tap is off. With FEED_MODE=composite there is
+ * no encoder per game: composite.mjs owns the ports for the whole session and only the engine's
+ * arguments are handed out (it needs NV12, which is the default).
+ */
 export function tapStart() {
   if (!ENABLED) return null;
+  if (process.env.FEED_MODE === "composite") return { ...engineSide(), stop() {} };
   const args = ffmpegArgs();
   log(`encoder ${ENCODER} ${W}x${H}@${FPS} ${KBPS}k -> ${FEED_URL}`);
   let proc;
@@ -123,19 +159,7 @@ export function tapStart() {
   });
   proc.on("exit", (code, sig) => log(`ffmpeg exited code=${code} sig=${sig}`));
   return {
-    engineArgs: [
-      "--stream-video-port", String(VIDEO_PORT),
-      "--stream-audio-port", String(AUDIO_PORT),
-      "--hidden", "--nodampen",
-      "--width", String(W), "--height", String(H),
-      "--frame-interval", String(Math.max(1, Math.floor(1000 / FPS))),
-    ],
-    // no real sound device and, off Windows, no display server either
-    env: {
-      SDL_AUDIODRIVER: "dummy",
-      ...(NV12 ? { HW_TAP_FORMAT: "nv12" } : {}),
-      ...(process.platform === "win32" ? {} : { SDL_VIDEODRIVER: "offscreen" }),
-    },
+    ...engineSide(),
     // the engine closing its sockets ends ffmpeg; this only mops up after a crash
     stop() {
       setTimeout(() => {

@@ -61,7 +61,10 @@
       .whalfwrap .wgrid { flex: 1; grid-template-columns: repeat(5, 1fr); }
       .wcell { background: var(--hw-panel-2); border: 1px solid var(--hw-border); border-radius: 8px; color: var(--hw-text); padding: 6px 2px 4px; display: flex; flex-direction: column; align-items: center; gap: 3px; overflow: hidden; }
       .wcell:not(.dim):active { border-color: var(--hw-accent); }
+      .wcell { position: relative; }
       .wcell.dim { opacity: 0.25; }
+      .wcount { position: absolute; top: 1px; right: 3px; font-size: 0.7rem; font-weight: bold; color: var(--hw-accent); text-shadow: 0 0 2px #000; }
+      .wcell.dim .wcount { color: var(--hw-dim); }
       .wcell.switcher { border-color: var(--hw-accent-2); }
       .wcell.noweap { border-color: var(--hw-accent); }
       .wnoweap { font-size: 1.6rem; color: var(--hw-dim); height: 32px; display: flex; align-items: center; justify-content: center; flex: none; }
@@ -84,6 +87,11 @@
     <div id="join" class="card">
       <input id="code" maxlength="6" placeholder="Room code" style="text-transform:uppercase; font-size:1.5rem" />
       <button id="joinBtn">Join</button>
+    </div>
+    <div id="takenover" class="card" hidden>
+      <h3>Taken over</h3>
+      <p>This seat is now controlled from another tab. A player holds one seat, and the newest tab has it.</p>
+      <button id="takeBack" type="button">Take control here</button>
     </div>
     <div id="game" hidden>
       <p id="status">connectingâ€¦</p>
@@ -152,6 +160,47 @@
       let isMyTurn = false;
       let myTeam = "";
       let ammoStore = "";
+      let ammoLive = null, controlsOn = false;
+      let freshHello = false, hasMine = false;   // the first state after a (re)connect decides what the page shows
+      // 60 x (count '0'-'8', '9' = nine or more, '*' = infinite; turns still to wait '0'-'9')
+      function parseAmmo(s) {
+        const cnt = [], wait = [];
+        for (let i = 0; i < 60; i++) { cnt.push(s[i * 2] || "0"); wait.push(Number(s[i * 2 + 1]) || 0); }
+        return { cnt, wait };
+      }
+      // can this weapon be used now, and what to write on it
+      function weaponState(w) {
+        if (ammoLive) {
+          const c = ammoLive.cnt[w - 1] || "0", wait = ammoLive.wait[w - 1] || 0;
+          if (c === "0") return { usable: false, badge: "0" };
+          if (wait > 0) return { usable: false, badge: "in " + wait };
+          return { usable: true, badge: c === "*" ? "\u221e" : c === "9" ? "9+" : c };
+        }
+        const a = ammoStore[w - 1] || "0";
+        return { usable: a !== "0", badge: "" };
+      }
+      // the team this phone registered, kept for the next visit (the room tells us too when we come back to it)
+      const SAVED_KEY = "hw_party_team";
+      let saved = null;
+      try { saved = JSON.parse(localStorage.getItem(SAVED_KEY) || "null"); } catch {}
+      function rememberTeam(config) {
+        saved = { room: code, registered: true, config };
+        try { localStorage.setItem(SAVED_KEY, JSON.stringify(saved)); } catch {}
+      }
+      function fillTeamForm(config) {
+        if (!config) return;
+        const set = (id, v) => { const el = document.getElementById(id); if (el && typeof v === "string") el.value = v; };
+        set("tname", config.name);
+        (config.hogs || []).slice(0, 4).forEach((h, i) => set("hog" + i, h && h.name));
+        if (teamData) applySavedPickers(config);
+      }
+      function applySavedPickers(config) {
+        const at = (list, name, dflt) => { const i = list.findIndex((x) => x.name === name); return i >= 0 ? i : dflt; };
+        flagIdx = at(teamData.flags, config.flag, flagIdx);
+        graveIdx = at(teamData.graves, config.grave, graveIdx);
+        voiceIdx = at(teamData.voices, config.voice, voiceIdx);
+        renderPickers();
+      }
       let backoff = 1500;
       let pingTimer = null;
       const bannerEl = document.createElement("div");
@@ -195,7 +244,10 @@
         const proto = location.protocol === "https:" ? "wss" : "ws";
         ws = new WebSocket(`${proto}://${location.host}/api/rooms/${code}/ws`);
         ws.onopen = () => { statusEl.textContent = "connected"; backoff = 1500; };
-        ws.onclose = () => {
+        const sock = ws;
+        ws.onclose = (e) => {
+          if (sock !== ws) return;                          // an old socket closing is not news
+          if (e.code === 4000) { takenOver(); return; }     // another tab took the seat: do not fight for it
           statusEl.textContent = "disconnected — retryingâ€¦";
           setTimeout(connect, backoff);
           backoff = Math.min(backoff * 2, 5000);
@@ -205,21 +257,41 @@
           if (msg.type === "hello") {
             if (msg.sid) mySid = msg.sid;
             if (msg.mode) { myMode = msg.mode; applyMode(); }
+            // coming back (a closed tab, a reload, a taken-over seat): the room knows what this phone registered
+            freshHello = true;
+            hasMine = !!msg.mine;
+            if (msg.mine) {
+              myTeam = (msg.mine.config && msg.mine.config.name) || myTeam;
+              fillTeamForm(msg.mine.config);
+              teamformEl.hidden = true;
+              activeEl.textContent = "team registered — waiting for game";
+            }
+            // a room whose host has not sent a state yet is in the lobby: do not wait for one forever
+            setTimeout(() => { if (freshHello) { freshHello = false; reRegister(); } }, 700);
           } else if (msg.type === "state") {
             const ingame = msg.state === "ingame";
             document.body.classList.toggle("ingame", ingame);
-            teamformEl.hidden = ingame;
+            const first = freshHello;
+            freshHello = false;
+            const keep = first && hasMine && !ingame;       // registered before the tab went away: stay registered
+            teamformEl.hidden = ingame || keep;
             controlsEl.hidden = !ingame;
             if (!ingame) {
-              activeEl.textContent = "waiting for game";
+              activeEl.textContent = keep ? "team registered — waiting for game" : "waiting for game";
               isMyTurn = false;
+              if (first) reRegister();
               document.getElementById("rolenote").hidden = true; // stale role from a past round
             } else {
               document.getElementById("seatnote").hidden = true;
             }
           } else if (msg.type === "weapons") {
             ammoStore = msg.ammo || "";
-            weaponsBtn.disabled = false;
+            weaponsBtn.disabled = !controlsOn;
+            renderWeapons();
+          } else if (msg.type === "ammo") {
+            // the engine's view for the player whose turn it is: a count and the turns to wait for each weapon
+            ammoLive = parseAmmo(msg.ammo || "");
+            weaponsBtn.disabled = !controlsOn;
             renderWeapons();
           } else if (msg.type === "turn") {
             const mine = msg.sid != null
@@ -303,7 +375,8 @@
       function setControlsEnabled(enabled) {
         padBtns.forEach((b) => (b.disabled = !enabled));
         fireBtn.disabled = !enabled;
-        weaponsBtn.disabled = !enabled || !ammoStore;
+        controlsOn = enabled;
+        weaponsBtn.disabled = !enabled || (!ammoStore && !ammoLive);
         if (!enabled) heldDirs.clear();
       }
 
@@ -414,6 +487,7 @@
             graveIdx = Math.max(0, d.graves.findIndex((g) => g.name === "Statue"));
             voiceIdx = Math.max(0, d.voices.findIndex((v) => v.name === "Default"));
             renderPickers();
+            if (saved && saved.config) applySavedPickers(saved.config);
             if (!teamformEl.hidden) playVoiceSample();
           })
           .catch(() => {});
@@ -443,8 +517,8 @@
         const cell = document.createElement("button");
         const name = nameByAmmo.get(w) || "?";
         cell.className = "wcell" + (name === "Switch Hedgehog" ? " switcher" : "");
-        const availChar = ammoStore[w - 1] || "0";
-        if (availChar === "0") cell.classList.add("dim");
+        const st = weaponState(w);
+        if (!st.usable) cell.classList.add("dim");
         const icon = document.createElement("div");
         icon.className = "wicon";
         const frame = w - 1;
@@ -455,7 +529,14 @@
         label.className = "wname";
         label.textContent = name;
         cell.appendChild(label);
+        if (st.badge) {
+          const count = document.createElement("span");
+          count.className = "wcount";
+          count.textContent = st.badge;
+          cell.appendChild(count);
+        }
         cell.onclick = () => {
+          if (!st.usable) return;   // none left, or not available yet
           send({ type: "input", action: "setweap " + String.fromCharCode(w) });
         };
         return cell;
@@ -515,21 +596,62 @@
           grave: teamData ? teamData.graves[graveIdx].name : "Statue",
           voice: teamData ? teamData.voices[voiceIdx].name : "Default",
         };
-        send({ type: "team", config });
-        myTeam = name;
-        teamformEl.hidden = true;
-        activeEl.textContent = "team registered — waiting for game";
+        registerTeam(config);
       };
 
+      // the room lost the registration with the tab that went away: send the saved team again
+      function reRegister() {
+        if (!hasMine && saved && saved.registered && saved.room === code && saved.config) registerTeam(saved.config);
+      }
+
+      function registerTeam(config) {
+        send({ type: "team", config });
+        myTeam = config.name;
+        rememberTeam(config);
+        teamformEl.hidden = true;
+        activeEl.textContent = "team registered — waiting for game";
+      }
+
+      const gameEl = document.getElementById("game");
       document.getElementById("joinBtn").onclick = async () => {
         code = codeEl.value.toUpperCase().trim();
         const res = await fetch(`/api/rooms/${code}/join`, { method: "POST" });
         if (!res.ok) { alert(res.status === 404 ? "no such room" : "join failed"); return; }
         document.getElementById("join").hidden = true;
-        document.getElementById("game").hidden = false;
+        gameEl.hidden = false;
         connect();
         if (teamData && !teamformEl.hidden) playVoiceSample();
       };
+
+      // ---- one seat per phone: the newest tab takes it ----
+      const takenoverEl = document.getElementById("takenover");
+      function takenOver() {
+        try { if (ws) { ws.onclose = null; ws.close(); } } catch {}
+        clearInterval(pingTimer);
+        pingTimer = null;
+        isMyTurn = false;
+        setControlsEnabled(false);
+        gameEl.hidden = true;
+        takenoverEl.hidden = false;
+      }
+      document.getElementById("takeBack").onclick = () => { takenoverEl.hidden = true; gameEl.hidden = false; connect(); };
+
+      // A closed tab comes back with its session cookie: while the room is still running with a host in it, go straight
+      // back to the seat (the room hands over the team, the turn, the weapons). Otherwise just remember the room code.
+      (async () => {
+        try {
+          const res = await fetch("/api/session", { cache: "no-store" });
+          if (res.status !== 200) return;
+          const s = await res.json();
+          if (code && code !== s.room) return;           // a link to another room: join that one the usual way
+          code = s.room;
+          codeEl.value = code;
+          if (!s.hostHere) return;
+          document.getElementById("join").hidden = true;
+          gameEl.hidden = false;
+          connect();
+        } catch {}
+      })();
     </script>
   </body>
 </html>

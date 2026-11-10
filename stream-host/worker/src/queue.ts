@@ -10,6 +10,7 @@ interface QueueEntry {
   name: string;
   config?: unknown; // team config prebuilt while queued
   at?: number; // when the entry joined (unconnected entries expire)
+  lostAt?: number; // when its socket went away: the place is kept for RESUME_GRACE_MS (a closed tab can come back)
 }
 
 // a player's stream identity, decided HERE (never by the client): either a
@@ -30,11 +31,18 @@ export const isAnonName = (name: string) => /^Anon[A-Z][a-z]+\d*$/.test(name);
 // anonymous queue input is bounded: a name, a prebuilt team config and the
 // queue itself must not be a way to wedge the Durable Object's storage or to
 // park phantom players at the front of the line
+// a socket that has just been closed (replaced by a newer tab) throws when sent to: that must never
+// stop the message reaching the others
+function safeSend(ws: WebSocket, data: string | ArrayBuffer): void {
+  try { ws.send(data); } catch { /* closing */ }
+}
+
 const MAX_NAME = 40;
 const MAX_CONFIG_JSON = 2048;
 const MAX_WS_MESSAGE = 4096;
 const MAX_QUEUE = 200;
 const UNCONNECTED_TTL_MS = 60_000;
+const RESUME_GRACE_MS = 120_000; // a queued player whose tab closed keeps their place this long
 // a lobby that has been opened (or had its first batch admitted) but is not
 // counting down yet still absorbs arrivals, for at most this long: it covers
 // the host's longest lobby wait, and a dead host cannot absorb players forever
@@ -184,7 +192,7 @@ export class QueueDO extends DurableObject {
 
   private broadcast(msg: unknown) {
     for (const ws of this.ctx.getWebSockets())
-      ws.send(JSON.stringify(msg));
+      safeSend(ws, JSON.stringify(msg));
   }
 
   // a message for ONE queued player: admission carries the round's room code,
@@ -193,7 +201,7 @@ export class QueueDO extends DurableObject {
     const data = JSON.stringify(msg);
     for (const ws of this.ctx.getWebSockets()) {
       const meta = ws.deserializeAttachment() as { sid?: string } | null;
-      if (meta?.sid === sid) ws.send(data);
+      if (meta?.sid === sid) safeSend(ws, data);
     }
   }
 
@@ -205,7 +213,8 @@ export class QueueDO extends DurableObject {
     );
     const now = Date.now();
     const before = this.queue.length;
-    this.queue = this.queue.filter((e) => live.has(e.sid) || now - (e.at ?? 0) < UNCONNECTED_TTL_MS);
+    this.queue = this.queue.filter((e) =>
+      live.has(e.sid) || (e.lostAt ? now - e.lostAt < RESUME_GRACE_MS : now - (e.at ?? 0) < UNCONNECTED_TTL_MS));
     return this.queue.length !== before;
   }
 
@@ -278,12 +287,13 @@ export class QueueDO extends DurableObject {
   }
 
   private pushQueueState() {
+    if (this.pruneUnconnected()) void this.save();
     for (const ws of this.ctx.getWebSockets()) {
       const meta = ws.deserializeAttachment() as { sid?: string };
       const sid = meta?.sid ?? "";
       const pos = this.positionFor(sid);
       const admittedRoom = this.popped[sid];
-      ws.send(JSON.stringify(
+      safeSend(ws, JSON.stringify(
         pos > 0
           ? { type: "queue", position: pos, total: this.queue.length }
           : admittedRoom
@@ -347,6 +357,26 @@ export class QueueDO extends DurableObject {
       return Response.json({ position: this.positionFor(sid), total: this.queue.length, name: me.name });
     }
 
+    // Where does this browser (or this account) stand? A sid still in the line or in the open round is resumed as it is;
+    // an account (`sub`) that holds a place under another sid hands that place to the asker: one seat per account, and
+    // the newest tab or device takes it over (the older one is closed with code 4000 when the new one connects).
+    if (url.pathname === "/resume" && req.method === "POST") {
+      const { sid, sub } = await req.json<{ sid?: string; sub?: string }>().catch(() => ({}) as { sid?: string; sub?: string });
+      if (this.pruneUnconnected()) await this.save();
+      const holds = (s: string | undefined): s is string =>
+        !!s && (this.queue.some((e) => e.sid === s) || (!!this.roundRoom && this.popped[s] === this.roundRoom));
+      let found: string | undefined = holds(sid) ? sid : undefined;
+      if (!found && typeof sub === "string" && sub) {
+        found = Object.entries(this.ident).find(([s, id]) => id.sub === sub && holds(s))?.[0];
+      }
+      if (!found) return Response.json({ state: "none" });
+      const name = this.ident[found]?.name;
+      const entry = this.queue.find((e) => e.sid === found);
+      if (entry?.lostAt) { delete entry.lostAt; await this.save(); }
+      if (!entry) return Response.json({ state: "admitted", sid: found, room: this.popped[found], name });
+      return Response.json({ state: "queued", sid: found, position: this.positionFor(found), total: this.queue.length, name });
+    }
+
     if (url.pathname === "/ws") {
       if (req.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
         return new Response("expected websocket", { status: 426 });
@@ -356,6 +386,13 @@ export class QueueDO extends DurableObject {
       this.ctx.acceptWebSocket(pair[1]);
       (pair[1] as unknown as { serializeAttachment: (a: unknown) => void })
         .serializeAttachment({ sid });
+      // one live queue socket per player: a newer tab takes over (the older one is told, code 4000, and stays closed)
+      for (const old of this.ctx.getWebSockets()) {
+        if (old === pair[1]) continue;
+        if ((old.deserializeAttachment() as { sid?: string } | null)?.sid === sid) { try { old.close(4000, "replaced"); } catch {} }
+      }
+      const mine = this.queue.find((e) => e.sid === sid);
+      if (mine?.lostAt) { delete mine.lostAt; await this.save(); }
       this.pushQueueState();
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
@@ -567,7 +604,7 @@ export class QueueDO extends DurableObject {
         if (entry) {
           entry.config = config;
           await this.save();
-          ws.send(JSON.stringify({ type: "team-saved" }));
+          safeSend(ws, JSON.stringify({ type: "team-saved" }));
         }
       }
     } catch {}
@@ -577,11 +614,15 @@ export class QueueDO extends DurableObject {
     const meta = ws.deserializeAttachment() as { sid?: string };
     if (!meta?.sid) return;
     await this.load();
-    const idx = this.queue.findIndex((e) => e.sid === meta.sid);
-    // a queued player whose socket went away is dropped; popped players are
-    // in a room and keep their queue history
-    if (idx >= 0 && !this.popped[meta.sid]) {
-      this.queue.splice(idx, 1);
+    // a replaced socket closing is not the player leaving
+    const other = this.ctx.getWebSockets().some((w) => w !== ws && w.readyState === 1
+      && (w.deserializeAttachment() as { sid?: string } | null)?.sid === meta.sid);
+    if (other) return;
+    const entry = this.queue.find((e) => e.sid === meta.sid);
+    // a queued player whose socket went away keeps their place for a while (the tab may only have been closed by
+    // accident: coming back resumes it, see /resume); popped players are in a room and keep their queue history
+    if (entry && !this.popped[meta.sid]) {
+      entry.lostAt = Date.now();
       await this.save();
       this.pushQueueState();
     }

@@ -1,0 +1,14 @@
+<!doctype html>
+<!-- a stand-in for the worker's /stream/scoreboard page: transparent background, a
+     translucent panel with text that changes every second, a solid corner badge -->
+<html><head><meta charset="utf-8"><style>
+html,body{background:transparent;margin:0}
+body{width:100vw;height:100vh;overflow:hidden;font-family:"Segoe UI",sans-serif;color:#f2ead8;text-shadow:0 2px 6px #000}
+#panel{position:absolute;left:60px;top:50px;padding:20px 36px;background:rgba(23,19,53,.78);border:3px solid #ffcc00;border-radius:18px;font-size:44px}
+#panel b{color:#ffcc00}
+#badge{position:absolute;right:50px;bottom:40px;padding:14px 30px;background:#c80000;border-radius:14px;font-size:40px;font-weight:700}
+</style></head><body>
+<div id="panel"><b>SCOREBOARD</b><br>AnonAlpha 3 : 1 AnonBeta<br><span id="t"></span></div>
+<div id="badge">LIVE TEST</div>
+<script>setInterval(()=>{t.textContent="tick "+new Date().toTimeString().slice(0,8)},250)</script>
+</body></html>

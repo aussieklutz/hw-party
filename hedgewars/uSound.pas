@@ -131,7 +131,7 @@ var Volume: LongInt;
     SoundTimerTicks: Longword;
     LastVoiceFailed: boolean;
 implementation
-uses uVariables, uConsole, uCommands, uDebug, uPhysFSLayer, uFrameTap;
+uses SysUtils, uVariables, uConsole, uCommands, uDebug, uPhysFSLayer, uFrameTap;
 
 const chanTPU = 32;
 var cInitVolume: LongInt;
@@ -405,7 +405,13 @@ begin
         begin
         WriteLnToConsole(msgOK);
         WriteToConsole('Open audio...');
-        success:= Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, channels, 1024) = 0;
+        // a stream has no sound card to pace the mixer: the dummy driver sleeps once per buffer, and whatever
+        // the sleep gets wrong (up to a few ms) is a tenth of a 1024 sample buffer but only about 1% of a big one
+        // (HW_AUDIO_CHUNK, in samples, overrides the size for measuring)
+        if cStreamAudioPort <> 0 then
+            success:= Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, channels, StrToIntDef(GetEnvironmentVariable('HW_AUDIO_CHUNK'), 4096)) = 0
+        else
+            success:= Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, channels, 1024) = 0;
         end;
 
     if success then
